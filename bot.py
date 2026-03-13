@@ -10,8 +10,12 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
 SOLANA_RPC = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
+BSC_RPC = "https://bsc-dataseed.binance.org/"
 
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+FOURMEME_CONTRACT = "0x5c952063c7fc8610ffdb798152d69f0b9550762b"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+ZERO_TOPIC = "0x0000000000000000000000000000000000000000000000000000000000000000"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -20,7 +24,9 @@ HEADERS = {
 
 known_cex_symbols = set()
 known_token_mints = set()
+known_bsc_tokens = set()
 last_signature = None
+last_bsc_block = None
 
 
 def send_telegram(message):
@@ -43,14 +49,11 @@ def send_telegram(message):
         print(f"Telegram接続エラー: {e}")
 
 
+# ===== Solana RPC =====
+
 def solana_rpc(method, params):
     try:
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params
-        }
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         r = requests.post(SOLANA_RPC, json=payload, timeout=15)
         if r.status_code == 200:
             data = r.json()
@@ -71,14 +74,11 @@ def get_new_pumpfun_transactions():
         params = [PUMPFUN_PROGRAM, {"limit": 20, "commitment": "confirmed"}]
         if last_signature:
             params[1]["until"] = last_signature
-
         result = solana_rpc("getSignaturesForAddress", params)
         if not result:
             return []
-
         if result:
             last_signature = result[0].get('signature', '')
-
         return result
     except Exception as e:
         print(f"トランザクション取得エラー: {e}")
@@ -91,111 +91,300 @@ def parse_new_token(signature):
         for attempt in range(3):
             result = solana_rpc("getTransaction", [
                 signature,
-                {
-                    "encoding": "jsonParsed",
-                    "maxSupportedTransactionVersion": 0,
-                    "commitment": "confirmed"
-                }
+                {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}
             ])
             if result:
                 break
             time.sleep(0.5)
-
         if not result:
             return None
-
         post_balances = result.get('meta', {}).get('postTokenBalances', [])
         pre_balances = result.get('meta', {}).get('preTokenBalances', [])
         pre_mints = {b.get('mint') for b in pre_balances}
-
         for balance in post_balances:
             mint = balance.get('mint', '')
             if mint and mint not in pre_mints:
                 print(f"[新規mint発見] {mint[:20]}")
                 return mint
-
     except Exception as e:
         print(f"トークン解析エラー: {e}")
     return None
 
 
 def wait_for_first_trade(mint, max_attempts=30):
-    print(f"[Pump.fun] 初回取引を待機中... {mint[:20]}")
+    print(f"[Pump.fun] 初回取引待機中... {mint[:20]}")
     for attempt in range(max_attempts):
         time.sleep(5)
-        sigs = solana_rpc("getSignaturesForAddress", [
-            mint, {"limit": 3, "commitment": "confirmed"}
-        ])
+        sigs = solana_rpc("getSignaturesForAddress", [mint, {"limit": 3, "commitment": "confirmed"}])
         if sigs and len(sigs) >= 2:
-            print(f"[Pump.fun] 初回取引検知！ {mint[:20]} (取引数:{len(sigs)})")
+            print(f"[Pump.fun] 初回取引検知！ {mint[:20]}")
             return True
         if attempt % 6 == 5:
             print(f"[Pump.fun] 待機中... {attempt+1}/30 {mint[:20]}")
-    print(f"[Pump.fun] タイムアウト（2.5分以内に取引なし）: {mint[:20]}")
+    print(f"[Pump.fun] タイムアウト: {mint[:20]}")
     return False
 
 
 def analyze_wallets(token_address):
     try:
-        sigs_result = solana_rpc("getSignaturesForAddress", [
-            token_address, {"limit": 50}
-        ])
+        sigs_result = solana_rpc("getSignaturesForAddress", [token_address, {"limit": 50}])
         if not sigs_result:
             return None
-
         wallets = []
         for sig_info in sigs_result[:30]:
             sig = sig_info.get('signature', '')
             if not sig:
                 continue
             time.sleep(0.15)
-            tx = solana_rpc("getTransaction", [
-                sig,
-                {"encoding": "json", "maxSupportedTransactionVersion": 0}
-            ])
+            tx = solana_rpc("getTransaction", [sig, {"encoding": "json", "maxSupportedTransactionVersion": 0}])
             if not tx:
                 continue
             account_keys = tx.get('transaction', {}).get('message', {}).get('accountKeys', [])
             if account_keys:
                 wallets.append(account_keys[0])
-
         if not wallets:
             return None
-
-        total = len(wallets)
-        unique = len(set(wallets))
-        counter = Counter(wallets)
-        top3 = counter.most_common(3)
-        top3_count = sum(c for _, c in top3)
-        top3_ratio = (top3_count / total * 100) if total > 0 else 0
-        max_single = top3[0][1] if top3 else 0
-        max_single_ratio = (max_single / total * 100) if total > 0 else 0
-
-        top5 = counter.most_common(5)
-        top5_detail = []
-        top5_total_count = 0
-        for i, (addr, count) in enumerate(top5):
-            ratio = count / total * 100
-            short_addr = addr[:6] + "..." + addr[-4:]
-            top5_detail.append(f"  {'ABCDE'[i]}. {short_addr}: {ratio:.1f}% ({count}件)")
-            top5_total_count += count
-
-        others_count = total - top5_total_count
-        others_unique = unique - min(len(top5), unique)
-        if others_count > 0:
-            others_ratio = others_count / total * 100
-            top5_detail.append(f"  その他: {others_ratio:.1f}% ({others_count}件 / {others_unique}人)")
-
-        return {
-            'total_txns': total,
-            'unique_wallets': unique,
-            'top3_ratio': top3_ratio,
-            'max_single_ratio': max_single_ratio,
-            'top5_detail': top5_detail,
-        }
+        return build_wallet_stats(wallets)
     except Exception as e:
         print(f"ウォレット分析エラー: {e}")
         return None
+
+
+# ===== BSC RPC =====
+
+def bsc_rpc(method, params):
+    try:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        r = requests.post(BSC_RPC, json=payload, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get('error'):
+                print(f"[BSC RPC Error] {method}: {data['error']}")
+                return None
+            return data.get('result')
+        else:
+            print(f"[BSC RPC HTTPエラー] {method}: {r.status_code}")
+    except Exception as e:
+        print(f"BSC RPCエラー ({method}): {e}")
+    return None
+
+
+def check_fourmeme_onchain():
+    global last_bsc_block, known_bsc_tokens
+
+    latest_hex = bsc_rpc("eth_blockNumber", [])
+    if not latest_hex:
+        return
+
+    latest_int = int(latest_hex, 16)
+
+    if last_bsc_block is None:
+        last_bsc_block = latest_int
+        print(f"[FourMeme] 初期化完了 最新ブロック={latest_int}")
+        return
+
+    if latest_int <= last_bsc_block:
+        return
+
+    # BSCは3秒/ブロック。60秒間隔なので最大20ブロック
+    from_block = max(last_bsc_block + 1, latest_int - 20)
+
+    logs = bsc_rpc("eth_getLogs", [{
+        "fromBlock": hex(from_block),
+        "toBlock": hex(latest_int),
+        "address": FOURMEME_CONTRACT
+    }])
+
+    last_bsc_block = latest_int
+
+    if not logs:
+        return
+
+    print(f"[FourMeme BSC] {len(logs)}件のイベント")
+
+    # ユニークなTXを処理
+    tx_hashes = list({log.get('transactionHash') for log in logs if log.get('transactionHash')})
+
+    for tx_hash in tx_hashes[:10]:
+        time.sleep(0.1)
+        receipt = bsc_rpc("eth_getTransactionReceipt", [tx_hash])
+        if not receipt:
+            continue
+
+        for rlog in receipt.get('logs', []):
+            topics = rlog.get('topics', [])
+            if len(topics) < 3:
+                continue
+
+            is_transfer = topics[0].lower() == TRANSFER_TOPIC
+            is_from_zero = topics[1] == ZERO_TOPIC
+
+            if is_transfer and is_from_zero:
+                token_address = rlog.get('address', '')
+                if not token_address:
+                    continue
+                token_lower = token_address.lower()
+                if token_lower in known_bsc_tokens:
+                    continue
+
+                known_bsc_tokens.add(token_lower)
+                print(f"[FourMeme新規] token={token_address}")
+
+                # 初回取引を待つ
+                traded = wait_for_first_bsc_trade(token_address)
+                if not traded:
+                    continue
+
+                time.sleep(30)
+
+                dex = analyze_dexscreener(token_address)
+                wallet_data = analyze_bsc_wallets(token_address)
+
+                if dex:
+                    dex_text = (
+                        f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+                        f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                        f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
+                    )
+                else:
+                    dex_text = "📊 価格データ取得中...\n"
+
+                wallet_text, wallet_judge = format_wallet_output(wallet_data)
+
+                msg = (
+                    f"🟡 <b>[FourMeme/BSC] 新規トークン 初回取引検知！</b>\n\n"
+                    f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                    f"Contract: <code>{token_address}</code>\n\n"
+                    f"{dex_text}\n"
+                    f"{wallet_text}\n"
+                    f"{wallet_judge}\n\n"
+                    f"📊 https://dexscreener.com/bsc/{token_address}\n"
+                    f"🔗 https://four.meme"
+                )
+                send_telegram(msg)
+                print(f"[FourMeme通知] token={token_address[:20]}")
+
+
+def wait_for_first_bsc_trade(token_address, max_attempts=30):
+    print(f"[FourMeme] 初回取引待機中... {token_address[:20]}")
+    for attempt in range(max_attempts):
+        time.sleep(5)
+        current_hex = bsc_rpc("eth_blockNumber", [])
+        if not current_hex:
+            continue
+        current_int = int(current_hex, 16)
+        from_b = current_int - 50  # 直近50ブロック(2.5分)
+
+        logs = bsc_rpc("eth_getLogs", [{
+            "fromBlock": hex(from_b),
+            "toBlock": hex(current_int),
+            "address": token_address,
+            "topics": [TRANSFER_TOPIC]
+        }])
+
+        if logs:
+            non_mint = [l for l in logs if l.get('topics', ['', ''])[1] != ZERO_TOPIC]
+            if non_mint:
+                print(f"[FourMeme] 初回取引検知！ {token_address[:20]}")
+                return True
+
+        if attempt % 6 == 5:
+            print(f"[FourMeme] 待機中... {attempt+1}/30 {token_address[:20]}")
+
+    print(f"[FourMeme] タイムアウト: {token_address[:20]}")
+    return False
+
+
+def analyze_bsc_wallets(token_address):
+    try:
+        current_hex = bsc_rpc("eth_blockNumber", [])
+        if not current_hex:
+            return None
+        current_int = int(current_hex, 16)
+        from_b = current_int - 2000  # 直近約100分
+
+        logs = bsc_rpc("eth_getLogs", [{
+            "fromBlock": hex(from_b),
+            "toBlock": hex(current_int),
+            "address": token_address,
+            "topics": [TRANSFER_TOPIC]
+        }])
+
+        if not logs:
+            return None
+
+        wallets = []
+        for log in logs:
+            topics = log.get('topics', [])
+            if len(topics) < 3:
+                continue
+            if topics[1] == ZERO_TOPIC:
+                continue  # mintはスキップ
+            to_addr = '0x' + topics[2][-40:]
+            wallets.append(to_addr)
+
+        if not wallets:
+            return None
+        return build_wallet_stats(wallets)
+    except Exception as e:
+        print(f"BSCウォレット分析エラー: {e}")
+        return None
+
+
+# ===== 共通ユーティリティ =====
+
+def build_wallet_stats(wallets):
+    total = len(wallets)
+    unique = len(set(wallets))
+    counter = Counter(wallets)
+    top3 = counter.most_common(3)
+    top3_count = sum(c for _, c in top3)
+    top3_ratio = (top3_count / total * 100) if total > 0 else 0
+    max_single = top3[0][1] if top3 else 0
+    max_single_ratio = (max_single / total * 100) if total > 0 else 0
+
+    top5 = counter.most_common(5)
+    top5_detail = []
+    top5_total_count = 0
+    for i, (addr, count) in enumerate(top5):
+        ratio = count / total * 100
+        short_addr = addr[:6] + "..." + addr[-4:]
+        top5_detail.append(f"  {'ABCDE'[i]}. {short_addr}: {ratio:.1f}% ({count}件)")
+        top5_total_count += count
+
+    others_count = total - top5_total_count
+    others_unique = unique - min(len(top5), unique)
+    if others_count > 0:
+        others_ratio = others_count / total * 100
+        top5_detail.append(f"  その他: {others_ratio:.1f}% ({others_count}件 / {others_unique}人)")
+
+    return {
+        'total_txns': total,
+        'unique_wallets': unique,
+        'top3_ratio': top3_ratio,
+        'max_single_ratio': max_single_ratio,
+        'top5_detail': top5_detail,
+    }
+
+
+def format_wallet_output(wallet_data):
+    if wallet_data:
+        top5_lines = "\n".join(wallet_data['top5_detail'])
+        wallet_text = (
+            f"👛 <b>ウォレット分析</b> (直近{wallet_data['total_txns']}取引)\n"
+            f"ユニーク: {wallet_data['unique_wallets']}人 / 上位3人合計: {wallet_data['top3_ratio']:.0f}%\n"
+            f"{top5_lines}\n"
+        )
+        if wallet_data['max_single_ratio'] >= 50:
+            wallet_judge = "🚨 自作自演の疑い強い"
+        elif wallet_data['top3_ratio'] < 30 and wallet_data['unique_wallets'] >= 15:
+            wallet_judge = "✅ 多様なウォレット"
+        else:
+            wallet_judge = "🟡 やや集中気味"
+    else:
+        wallet_text = "👛 ウォレットデータ取得中...\n"
+        wallet_judge = ""
+    return wallet_text, wallet_judge
 
 
 def analyze_dexscreener(token_address):
@@ -225,11 +414,7 @@ def get_cex_symbols():
         response = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
         data = response.json()
         if data.get('code') == '00000':
-            return {
-                item['symbol']
-                for item in data['data']
-                if item.get('status') == 'online'
-            }
+            return {item['symbol'] for item in data['data'] if item.get('status') == 'online'}
     except Exception as e:
         print(f"Bitget APIエラー: {e}")
     return set()
@@ -266,10 +451,7 @@ def check_pumpfun_onchain():
 
     for tx_info in txns:
         sig = tx_info.get('signature', '')
-        if not sig:
-            continue
-
-        if tx_info.get('err'):
+        if not sig or tx_info.get('err'):
             continue
 
         time.sleep(0.2)
@@ -289,6 +471,7 @@ def check_pumpfun_onchain():
         dex = analyze_dexscreener(mint)
         print(f"[Pump.fun] ウォレット分析中... {mint[:20]}")
         wallet_data = analyze_wallets(mint)
+        wallet_text, wallet_judge = format_wallet_output(wallet_data)
 
         if dex:
             dex_text = (
@@ -299,25 +482,8 @@ def check_pumpfun_onchain():
         else:
             dex_text = "📊 価格データ取得中...\n"
 
-        if wallet_data:
-            top5_lines = "\n".join(wallet_data['top5_detail'])
-            wallet_text = (
-                f"👛 <b>ウォレット分析</b> (直近{wallet_data['total_txns']}取引)\n"
-                f"ユニーク: {wallet_data['unique_wallets']}人 / 上位3人合計: {wallet_data['top3_ratio']:.0f}%\n"
-                f"{top5_lines}\n"
-            )
-            if wallet_data['max_single_ratio'] >= 50:
-                wallet_judge = "🚨 自作自演の疑い強い"
-            elif wallet_data['top3_ratio'] < 30 and wallet_data['unique_wallets'] >= 15:
-                wallet_judge = "✅ 多様なウォレット"
-            else:
-                wallet_judge = "🟡 やや集中気味"
-        else:
-            wallet_text = "👛 ウォレットデータ取得中...\n"
-            wallet_judge = ""
-
         msg = (
-            f"🚀 <b>[Pump.fun] 新規トークン 初回取引検知！</b>\n\n"
+            f"🚀 <b>[Pump.fun/Solana] 新規トークン 初回取引検知！</b>\n\n"
             f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
             f"Mint: <code>{mint}</code>\n\n"
             f"{dex_text}\n"
@@ -336,30 +502,40 @@ def main():
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
         "📊 監視対象：\n"
         "🏦 CEX: Bitget取引所（新規上場）\n"
-        "🚀 DEX: Solanaブロックチェーン直接監視\n\n"
-        "🔍 通知タイミング：\n"
-        "・新規トークン作成後、最初の取引が来た瞬間"
+        "🚀 Solana: Pump.fun 新規トークン\n"
+        "🟡 BSC: FourMeme 新規トークン\n\n"
+        "🔍 通知タイミング：初回取引が来た瞬間"
     )
 
+    # Solana初期化
     print("[Pump.fun] 初期化中...")
-    init_sigs = solana_rpc("getSignaturesForAddress", [
-        PUMPFUN_PROGRAM, {"limit": 5}
-    ])
+    init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
         global last_signature
         last_signature = init_sigs[0].get('signature', '')
         print(f"[Pump.fun] 初期化完了 最新sig={last_signature[:20]}")
     else:
-        print("[Pump.fun] 初期化失敗 - RPC接続を確認してください")
+        print("[Pump.fun] 初期化失敗")
+
+    # BSC初期化
+    print("[FourMeme] 初期化中...")
+    init_block = bsc_rpc("eth_blockNumber", [])
+    if init_block:
+        global last_bsc_block
+        last_bsc_block = int(init_block, 16)
+        print(f"[FourMeme] 初期化完了 最新ブロック={last_bsc_block}")
+    else:
+        print("[FourMeme] 初期化失敗")
 
     loop = 0
     while True:
         check_cex_listings()
         check_pumpfun_onchain()
-        time.sleep(60)  # ← 60秒に変更（無料枠節約）
+        check_fourmeme_onchain()
+        time.sleep(60)
         loop += 1
         if loop % 10 == 0:
-            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} 検知済み={len(known_token_mints)}")
+            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} Solana={len(known_token_mints)} BSC={len(known_bsc_tokens)}")
 
 
 if __name__ == "__main__":
