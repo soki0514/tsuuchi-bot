@@ -247,7 +247,7 @@ def check_evm_chain(chain):
     if latest_int <= chain["last_block"]:
         return
 
-    from_block = max(chain["last_block"] + 1, latest_int - 20)
+    from_block = chain["last_block"] + 1
 
     logs = evm_rpc(rpc_url, "eth_getLogs", [{
         "fromBlock": hex(from_block),
