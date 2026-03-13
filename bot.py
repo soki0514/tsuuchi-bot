@@ -119,6 +119,24 @@ def parse_new_token(signature):
     return None
 
 
+def wait_for_first_trade(mint, max_attempts=30):
+    """最初の取引が来るまで待つ（5秒×30回 = 最大2.5分）"""
+    print(f"[Pump.fun] 初回取引を待機中... {mint[:20]}")
+    for attempt in range(max_attempts):
+        time.sleep(5)
+        sigs = solana_rpc("getSignaturesForAddress", [
+            mint, {"limit": 3, "commitment": "confirmed"}
+        ])
+        if sigs and len(sigs) >= 2:
+            # 作成TX + 取引TX で2件以上 = 誰かが取引した
+            print(f"[Pump.fun] 初回取引検知！ {mint[:20]} (取引数:{len(sigs)})")
+            return True
+        if attempt % 6 == 5:
+            print(f"[Pump.fun] 待機中... {attempt+1}/30 {mint[:20]}")
+    print(f"[Pump.fun] タイムアウト（2.5分以内に取引なし）: {mint[:20]}")
+    return False
+
+
 def analyze_wallets(token_address):
     try:
         sigs_result = solana_rpc("getSignaturesForAddress", [
@@ -262,8 +280,14 @@ def check_pumpfun_onchain():
             continue
 
         known_token_mints.add(mint)
-        print(f"[Pump.fun新規] mint={mint[:20]} 分析開始...")
+        print(f"[Pump.fun新規] mint={mint[:20]}")
 
+        # 誰かが最初の取引をするまで待つ
+        traded = wait_for_first_trade(mint)
+        if not traded:
+            continue  # 2.5分待っても取引なし → スキップ
+
+        # 取引が来た！30秒待ってデータを取得
         time.sleep(30)
 
         dex = analyze_dexscreener(mint)
@@ -297,7 +321,7 @@ def check_pumpfun_onchain():
             wallet_judge = ""
 
         msg = (
-            f"🚀 <b>[Pump.fun] 新規トークン検知！</b>\n\n"
+            f"🚀 <b>[Pump.fun] 新規トークン 初回取引検知！</b>\n\n"
             f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
             f"Mint: <code>{mint}</code>\n\n"
             f"{dex_text}\n"
@@ -317,9 +341,8 @@ def main():
         "📊 監視対象：\n"
         "🏦 CEX: Bitget取引所（新規上場）\n"
         "🚀 DEX: Solanaブロックチェーン直接監視\n\n"
-        "🔍 分析内容：\n"
-        "・流動性・買い/売り比率\n"
-        "・ウォレット多様性（自作自演チェック）"
+        "🔍 通知タイミング：\n"
+        "・新規トークン作成後、最初の取引が来た瞬間"
     )
 
     print("[Pump.fun] 初期化中...")
