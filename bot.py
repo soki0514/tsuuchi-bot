@@ -74,10 +74,7 @@ def get_new_pumpfun_transactions():
 
         result = solana_rpc("getSignaturesForAddress", params)
         if not result:
-            print("[DEBUG] getSignaturesForAddress: 結果なし")
             return []
-
-        print(f"[DEBUG] 取得TX数: {len(result)}")
 
         if result:
             last_signature = result[0].get('signature', '')
@@ -90,10 +87,8 @@ def get_new_pumpfun_transactions():
 
 def parse_new_token(signature):
     try:
-        print(f"[DEBUG] TX解析中: {signature[:20]}")
-
         result = None
-        for attempt in range(3):  # 最大3回リトライ
+        for attempt in range(3):
             result = solana_rpc("getTransaction", [
                 signature,
                 {
@@ -104,10 +99,9 @@ def parse_new_token(signature):
             ])
             if result:
                 break
-            time.sleep(0.5)  # 0.5秒待ってリトライ
+            time.sleep(0.5)
 
         if not result:
-            print(f"[DEBUG] getTransaction失敗(3回試行): {signature[:20]}")
             return None
 
         post_balances = result.get('meta', {}).get('postTokenBalances', [])
@@ -119,10 +113,6 @@ def parse_new_token(signature):
             if mint and mint not in pre_mints:
                 print(f"[新規mint発見] {mint[:20]}")
                 return mint
-
-        log_messages = result.get('meta', {}).get('logMessages', [])
-        for log in log_messages:
-            print(f"[TX log] {log[:80]}")
 
     except Exception as e:
         print(f"トークン解析エラー: {e}")
@@ -142,7 +132,7 @@ def analyze_wallets(token_address):
             sig = sig_info.get('signature', '')
             if not sig:
                 continue
-            time.sleep(0.15)  # レート制限対策
+            time.sleep(0.15)
             tx = solana_rpc("getTransaction", [
                 sig,
                 {"encoding": "json", "maxSupportedTransactionVersion": 0}
@@ -266,7 +256,7 @@ def check_pumpfun_onchain():
         if tx_info.get('err'):
             continue
 
-        time.sleep(0.2)  # TX間に0.2秒待機（レート制限対策）
+        time.sleep(0.2)
         mint = parse_new_token(sig)
         if not mint or mint in known_token_mints:
             continue
