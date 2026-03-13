@@ -7,7 +7,12 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
-PUMPFUN_URL = "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false"
+DEXSCREENER_PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json"
+}
 
 known_cex_symbols = set()
 known_dex_tokens = set()
@@ -16,19 +21,20 @@ known_dex_tokens = set()
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={
+        r = requests.post(url, json={
             "chat_id": CHAT_ID,
             "text": message,
             "parse_mode": "HTML",
             "disable_web_page_preview": True
         }, timeout=10)
+        print(f"Telegram送信: {r.status_code}")
     except Exception as e:
         print(f"Telegram送信エラー: {e}")
 
 
 def get_cex_symbols():
     try:
-        response = requests.get(BITGET_SYMBOLS_URL, timeout=10)
+        response = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
         data = response.json()
         if data.get('code') == '00000':
             return {
@@ -63,48 +69,60 @@ def check_cex_listings():
     known_cex_symbols = current
 
 
-def check_pumpfun():
+def check_dexscreener():
     global known_dex_tokens
     try:
-        response = requests.get(PUMPFUN_URL, timeout=10)
-        coins = response.json()
-        if not isinstance(coins, list):
+        response = requests.get(DEXSCREENER_PROFILES_URL, headers=HEADERS, timeout=15)
+        if response.status_code != 200:
+            print(f"[DEX] HTTPエラー: {response.status_code}")
+            return
+
+        tokens = response.json()
+        if not isinstance(tokens, list):
+            print(f"[DEX] 予期しないレスポンス形式")
             return
 
         if not known_dex_tokens:
-            for coin in coins:
-                mint = coin.get('mint', '')
-                if mint:
-                    known_dex_tokens.add(mint)
+            for token in tokens:
+                addr = token.get('tokenAddress', '')
+                if addr:
+                    known_dex_tokens.add(addr)
             print(f"[DEX] 初期化完了: {len(known_dex_tokens)}トークン記憶")
             return
 
-        for coin in coins:
-            mint = coin.get('mint', '')
-            if not mint or mint in known_dex_tokens:
+        for token in tokens:
+            addr = token.get('tokenAddress', '')
+            if not addr or addr in known_dex_tokens:
                 continue
-            known_dex_tokens.add(mint)
 
-            market_cap = coin.get('usd_market_cap', 0) or 0
-            name = coin.get('name', '?')
-            symbol = coin.get('symbol', '?')
-            replies = coin.get('reply_count', 0) or 0
+            known_dex_tokens.add(addr)
 
-            if market_cap >= 20000 and replies >= 3:
-                msg = (
-                    f"🚀 <b>[DEX/Solana] 新規ミームコイン！</b>\n\n"
-                    f"名前: <b>{name} (${symbol})</b>\n"
-                    f"時価総額: ${market_cap:,.0f}\n"
-                    f"コメント数: {replies}件\n"
-                    f"時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                    f"⚠️ 高リスク・高リターン\n"
-                    f"🔗 https://pump.fun/{mint}"
-                )
-                send_telegram(msg)
-                print(f"[DEX新規] {name} ${symbol} MC=${market_cap:,.0f}")
+            chain = token.get('chainId', '?')
+
+            if chain == 'solana':
+                trade_url = f"https://pump.fun/{addr}"
+                chain_label = "Solana"
+            elif chain == 'bsc':
+                trade_url = f"https://pancakeswap.finance/swap?outputCurrency={addr}"
+                chain_label = "BSC"
+            else:
+                trade_url = f"https://dexscreener.com/{chain}/{addr}"
+                chain_label = chain.upper()
+
+            msg = (
+                f"🚀 <b>[DEX/{chain_label}] 新規トークン検知！</b>\n\n"
+                f"チェーン: {chain_label}\n"
+                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"アドレス: <code>{addr[:20]}...</code>\n\n"
+                f"⚠️ 高リスク・高リターン（詐欺注意）\n"
+                f"📊 https://dexscreener.com/{chain}/{addr}\n"
+                f"🔗 {trade_url}"
+            )
+            send_telegram(msg)
+            print(f"[DEX新規] chain={chain} addr={addr[:20]}")
 
     except Exception as e:
-        print(f"Pump.funエラー: {e}")
+        print(f"DexScreenerエラー: {e}")
 
 
 def main():
@@ -113,19 +131,17 @@ def main():
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
         "📊 監視対象：\n"
         "🏦 CEX: Bitget取引所（60秒ごと）\n"
-        "🚀 DEX: Pump.fun Solanaミームコイン（30秒ごと）\n\n"
+        "🚀 DEX: DexScreener 全チェーン（60秒ごと）\n\n"
         "新規トークンを検知したらすぐに通知します！"
     )
 
     loop = 0
     while True:
         check_cex_listings()
-        check_pumpfun()
-        time.sleep(30)
-        check_pumpfun()
-        time.sleep(30)
+        check_dexscreener()
+        time.sleep(60)
         loop += 1
-        if loop % 20 == 0:
+        if loop % 10 == 0:
             print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} DEX={len(known_dex_tokens)}")
 
 
