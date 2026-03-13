@@ -120,7 +120,6 @@ def parse_new_token(signature):
 
 
 def wait_for_first_trade(mint, max_attempts=30):
-    """最初の取引が来るまで待つ（5秒×30回 = 最大2.5分）"""
     print(f"[Pump.fun] 初回取引を待機中... {mint[:20]}")
     for attempt in range(max_attempts):
         time.sleep(5)
@@ -128,7 +127,6 @@ def wait_for_first_trade(mint, max_attempts=30):
             mint, {"limit": 3, "commitment": "confirmed"}
         ])
         if sigs and len(sigs) >= 2:
-            # 作成TX + 取引TX で2件以上 = 誰かが取引した
             print(f"[Pump.fun] 初回取引検知！ {mint[:20]} (取引数:{len(sigs)})")
             return True
         if attempt % 6 == 5:
@@ -282,12 +280,10 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun新規] mint={mint[:20]}")
 
-        # 誰かが最初の取引をするまで待つ
         traded = wait_for_first_trade(mint)
         if not traded:
-            continue  # 2.5分待っても取引なし → スキップ
+            continue
 
-        # 取引が来た！30秒待ってデータを取得
         time.sleep(30)
 
         dex = analyze_dexscreener(mint)
@@ -360,9 +356,9 @@ def main():
     while True:
         check_cex_listings()
         check_pumpfun_onchain()
-        time.sleep(20)
+        time.sleep(60)  # ← 60秒に変更（無料枠節約）
         loop += 1
-        if loop % 30 == 0:
+        if loop % 10 == 0:
             print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} 検知済み={len(known_token_mints)}")
 
 
