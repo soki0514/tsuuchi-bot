@@ -8,16 +8,24 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
-DEXSCREENER_PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
+PUMPFUN_URL = "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false"
 SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 
-HEADERS = {
+PUMPFUN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://pump.fun/",
+    "Origin": "https://pump.fun",
+}
+
+DEXSCREENER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json"
 }
 
 known_cex_symbols = set()
-known_dex_tokens = set()
+known_pumpfun_tokens = set()
 
 
 def send_telegram(message):
@@ -116,10 +124,10 @@ def analyze_wallets(token_address):
         return None
 
 
-def analyze_token(token_address):
+def analyze_dexscreener(token_address):
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        response = requests.get(url, headers=DEXSCREENER_HEADERS, timeout=10)
         if response.status_code != 200:
             return None
         data = response.json()
@@ -142,82 +150,9 @@ def analyze_token(token_address):
         return None
 
 
-def score_token(analysis, wallet_data):
-    score = 0
-    signals = []
-
-    if analysis:
-        liq = analysis['liquidity']
-        if liq >= 50000:
-            score += 25
-            signals.append("✅ 流動性十分 ($50K+)")
-        elif liq >= 20000:
-            score += 15
-            signals.append("🟡 流動性やや低め ($20K+)")
-        elif liq >= 10000:
-            score += 8
-            signals.append("⚠️ 流動性低い ($10K+)")
-        else:
-            signals.append("🔴 流動性危険 ($10K未満)")
-
-        buys = analysis['buys_5m']
-        sells = analysis['sells_5m']
-        if buys >= 30:
-            score += 20
-            signals.append(f"✅ 買い活発 ({buys}件/5分)")
-        elif buys >= 10:
-            score += 12
-            signals.append(f"🟡 買いまあまあ ({buys}件/5分)")
-        else:
-            signals.append(f"🔴 買い少ない ({buys}件/5分)")
-
-        total = buys + sells
-        if total > 0:
-            buy_ratio = buys / total
-            if buy_ratio >= 0.7:
-                score += 15
-                signals.append(f"✅ 買い優勢 ({int(buy_ratio*100)}%が買い)")
-            elif buy_ratio >= 0.5:
-                score += 8
-                signals.append(f"🟡 買い/売りほぼ同等")
-            else:
-                signals.append(f"🔴 売り優勢（逃げている人多い）")
-
-        pc = analysis['price_change_5m']
-        if pc > 20:
-            score += 15
-            signals.append(f"✅ 急上昇中 (+{pc:.1f}%/5分)")
-        elif pc > 0:
-            score += 8
-            signals.append(f"🟡 上昇中 (+{pc:.1f}%/5分)")
-        else:
-            signals.append(f"🔴 下落中 ({pc:.1f}%/5分)")
-
-    if wallet_data:
-        unique = wallet_data['unique_wallets']
-        top3_ratio = wallet_data['top3_ratio']
-        max_ratio = wallet_data['max_single_ratio']
-
-        if unique >= 20 and top3_ratio < 30:
-            score += 25
-            signals.append(f"✅ 多様なウォレット (ユニーク{unique}人、上位3人={top3_ratio:.0f}%)")
-        elif unique >= 10 and top3_ratio < 50:
-            score += 15
-            signals.append(f"🟡 まあまあ多様 (ユニーク{unique}人、上位3人={top3_ratio:.0f}%)")
-        else:
-            signals.append(f"🔴 自作自演の疑い (ユニーク{unique}人、上位3人={top3_ratio:.0f}%)")
-
-        if max_ratio >= 50:
-            signals.append(f"🚨 1つのウォレットが{max_ratio:.0f}%の取引 → ほぼ確実に自作自演")
-    else:
-        signals.append("⚪ ウォレット分析データなし")
-
-    return min(score, 100), signals
-
-
 def get_cex_symbols():
     try:
-        response = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
+        response = requests.get(BITGET_SYMBOLS_URL, headers=DEXSCREENER_HEADERS, timeout=10)
         data = response.json()
         if data.get('code') == '00000':
             return {
@@ -252,70 +187,68 @@ def check_cex_listings():
     known_cex_symbols = current
 
 
-def check_dexscreener():
-    global known_dex_tokens
+def check_pumpfun():
+    global known_pumpfun_tokens
     try:
-        response = requests.get(DEXSCREENER_PROFILES_URL, headers=HEADERS, timeout=15)
-        if response.status_code == 429:
-            print("[DEX] 速度制限(429)... 休憩中")
-            time.sleep(30)
-            return
-        elif response.status_code != 200:
-            print(f"[DEX] HTTPエラー: {response.status_code}")
+        response = requests.get(PUMPFUN_URL, headers=PUMPFUN_HEADERS, timeout=15)
+        if response.status_code != 200:
+            print(f"[Pump.fun] HTTPエラー: {response.status_code}")
             return
 
-        tokens = response.json()
-        if not isinstance(tokens, list):
+        coins = response.json()
+        if not isinstance(coins, list):
+            print(f"[Pump.fun] 予期しないレスポンス形式")
             return
 
-        if not known_dex_tokens:
-            for token in tokens:
-                addr = token.get('tokenAddress', '')
-                if addr:
-                    known_dex_tokens.add(addr)
-            print(f"[DEX] 初期化完了: {len(known_dex_tokens)}トークン記憶")
+        if not known_pumpfun_tokens:
+            for coin in coins:
+                mint = coin.get('mint', '')
+                if mint:
+                    known_pumpfun_tokens.add(mint)
+            print(f"[Pump.fun] 初期化完了: {len(known_pumpfun_tokens)}トークン記憶")
             return
 
-        for token in tokens:
-            addr = token.get('tokenAddress', '')
-            if not addr or addr in known_dex_tokens:
+        for coin in coins:
+            mint = coin.get('mint', '')
+            if not mint or mint in known_pumpfun_tokens:
                 continue
-            known_dex_tokens.add(addr)
+            known_pumpfun_tokens.add(mint)
 
-            chain = token.get('chainId', '?')
-            if chain == 'solana':
-                trade_url = f"https://pump.fun/{addr}"
-                chain_label = "Solana"
-            elif chain == 'bsc':
-                trade_url = f"https://pancakeswap.finance/swap?outputCurrency={addr}"
-                chain_label = "BSC"
-            else:
-                trade_url = f"https://dexscreener.com/{chain}/{addr}"
-                chain_label = chain.upper()
+            name = coin.get('name', '?')
+            symbol = coin.get('symbol', '?')
+            market_cap = coin.get('usd_market_cap', 0) or 0
+            replies = coin.get('reply_count', 0) or 0
+            creator = coin.get('creator', '')
+            twitter = coin.get('twitter', '')
+            telegram = coin.get('telegram', '')
+            website = coin.get('website', '')
 
-            print(f"[DEX] 新規検知 → 30秒後に分析開始 addr={addr[:20]}")
+            sns_lines = []
+            if twitter:
+                sns_lines.append(f"🐦 Twitter: {twitter}")
+            if telegram:
+                sns_lines.append(f"💬 Telegram: {telegram}")
+            if website:
+                sns_lines.append(f"🌐 Web: {website}")
+            sns_text = "\n".join(sns_lines) if sns_lines else "⚪ SNSなし"
+
+            creator_short = creator[:6] + "..." + creator[-4:] if creator else "不明"
+
+            print(f"[Pump.fun新規] {name} ${symbol} MC=${market_cap:,.0f} 分析開始...")
             time.sleep(30)
 
-            analysis = analyze_token(addr)
+            dex = analyze_dexscreener(mint)
+            print(f"[Pump.fun] ウォレット分析中... {mint[:20]}")
+            wallet_data = analyze_wallets(mint)
 
-            wallet_data = None
-            if chain == 'solana':
-                print(f"[DEX] ウォレット分析中... addr={addr[:20]}")
-                wallet_data = analyze_wallets(addr)
-
-            score, signals = score_token(analysis, wallet_data)
-
-            signals_text = "\n".join(signals) if signals else "データなし"
-            score_emoji = "🟢" if score >= 60 else "🟡" if score >= 35 else "🔴"
-
-            if analysis:
-                stats = (
-                    f"💧 流動性: ${analysis['liquidity']:,.0f}\n"
-                    f"📈 価格変動: {analysis['price_change_5m']:+.1f}%/5分\n"
-                    f"🛒 買い{analysis['buys_5m']}件 / 売り{analysis['sells_5m']}件 (5分)\n"
+            if dex:
+                dex_text = (
+                    f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+                    f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                    f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
                 )
             else:
-                stats = "📊 データ取得中...\n"
+                dex_text = "📊 価格データ取得中...\n"
 
             if wallet_data:
                 top5_lines = "\n".join(wallet_data['top5_detail'])
@@ -324,25 +257,35 @@ def check_dexscreener():
                     f"ユニーク: {wallet_data['unique_wallets']}人 / 上位3人合計: {wallet_data['top3_ratio']:.0f}%\n"
                     f"{top5_lines}\n"
                 )
+                if wallet_data['max_single_ratio'] >= 50:
+                    wallet_judge = "🚨 自作自演の疑い強い"
+                elif wallet_data['top3_ratio'] < 30 and wallet_data['unique_wallets'] >= 15:
+                    wallet_judge = "✅ 多様なウォレット"
+                else:
+                    wallet_judge = "🟡 やや集中気味"
             else:
-                wallet_text = ""
+                wallet_text = "👛 ウォレットデータ取得中...\n"
+                wallet_judge = ""
 
             msg = (
-                f"🚀 <b>[DEX/{chain_label}] 新規トークン検知！</b>\n\n"
+                f"🚀 <b>[Pump.fun] 新規トークン検知！</b>\n\n"
+                f"名前: <b>{name} (${symbol})</b>\n"
                 f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"アドレス: <code>{addr}</code>\n\n"
-                f"{score_emoji} <b>安全スコア: {score}/100</b>\n\n"
-                f"{stats}"
+                f"時価総額: ${market_cap:,.0f}\n"
+                f"コメント: {replies}件\n"
+                f"作成者: <code>{creator_short}</code>\n\n"
+                f"{dex_text}\n"
                 f"{wallet_text}\n"
-                f"<b>📋 分析:</b>\n{signals_text}\n\n"
-                f"📊 https://dexscreener.com/{chain}/{addr}\n"
-                f"🔗 {trade_url}"
+                f"{wallet_judge}\n\n"
+                f"{sns_text}\n\n"
+                f"📊 https://dexscreener.com/solana/{mint}\n"
+                f"🔗 https://pump.fun/{mint}"
             )
             send_telegram(msg)
-            print(f"[DEX新規通知] chain={chain} score={score} addr={addr[:20]}")
+            print(f"[Pump.fun通知] {name} ${symbol} MC=${market_cap:,.0f}")
 
     except Exception as e:
-        print(f"DexScreenerエラー: {e}")
+        print(f"Pump.funエラー: {e}")
 
 
 def main():
@@ -350,22 +293,22 @@ def main():
     send_telegram(
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
         "📊 監視対象：\n"
-        "🏦 CEX: Bitget取引所\n"
-        "🚀 DEX: DexScreener 全チェーン\n\n"
+        "🏦 CEX: Bitget取引所（新規上場）\n"
+        "🚀 DEX: Pump.fun直接監視（30秒ごと）\n\n"
         "🔍 分析内容：\n"
-        "・安全スコア（100点満点）\n"
         "・流動性・買い/売り比率\n"
-        "・ウォレット多様性（自作自演チェック）"
+        "・ウォレット多様性（自作自演チェック）\n"
+        "・SNS情報・作成者アドレス"
     )
 
     loop = 0
     while True:
         check_cex_listings()
-        check_dexscreener()
-        time.sleep(60)
+        check_pumpfun()
+        time.sleep(30)
         loop += 1
-        if loop % 10 == 0:
-            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} DEX={len(known_dex_tokens)}")
+        if loop % 20 == 0:
+            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} Pump.fun={len(known_pumpfun_tokens)}")
 
 
 if __name__ == "__main__":
