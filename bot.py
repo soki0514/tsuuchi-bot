@@ -3,6 +3,7 @@ import time
 import os
 from datetime import datetime
 
+# 環境変数の読み込み
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
@@ -17,20 +18,25 @@ HEADERS = {
 known_cex_symbols = set()
 known_dex_tokens = set()
 
-
 def send_telegram(message):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("⚠️ Telegramの設定(BOT_TOKEN/CHAT_ID)が空です。")
+        return
+    
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         r = requests.post(url, json={
             "chat_id": CHAT_ID,
             "text": message,
             "parse_mode": "HTML",
-            "disable_web_page_preview": True
+            "disable_web_page_preview": False # プレビューで見やすくする
         }, timeout=10)
-        print(f"Telegram送信: {r.status_code}")
+        if r.status_code != 200:
+            print(f"Telegram送信エラー: {r.status_code} - {r.text}")
+        else:
+            print(f"Telegram送信成功！")
     except Exception as e:
-        print(f"Telegram送信エラー: {e}")
-
+        print(f"Telegram接続エラー: {e}")
 
 def get_cex_symbols():
     try:
@@ -46,7 +52,6 @@ def get_cex_symbols():
         print(f"Bitget APIエラー: {e}")
     return set()
 
-
 def check_cex_listings():
     global known_cex_symbols
     current = get_cex_symbols()
@@ -54,6 +59,7 @@ def check_cex_listings():
         known_cex_symbols = current
         print(f"[CEX] 初期化完了: {len(known_cex_symbols)}ペア監視中")
         return
+    
     for symbol in current - known_cex_symbols:
         if symbol.endswith('USDT'):
             base = symbol.replace('USDT', '')
@@ -68,18 +74,20 @@ def check_cex_listings():
             print(f"[CEX新規] {symbol}")
     known_cex_symbols = current
 
-
 def check_dexscreener():
     global known_dex_tokens
     try:
         response = requests.get(DEXSCREENER_PROFILES_URL, headers=HEADERS, timeout=15)
-        if response.status_code != 200:
+        if response.status_code == 429:
+            print(f"[DEX] 速度制限(429)中... 少し休みます")
+            time.sleep(10)
+            return
+        elif response.status_code != 200:
             print(f"[DEX] HTTPエラー: {response.status_code}")
             return
 
         tokens = response.json()
         if not isinstance(tokens, list):
-            print(f"[DEX] 予期しないレスポンス形式")
             return
 
         if not known_dex_tokens:
@@ -96,7 +104,6 @@ def check_dexscreener():
                 continue
 
             known_dex_tokens.add(addr)
-
             chain = token.get('chainId', '?')
 
             if chain == 'solana':
@@ -109,41 +116,32 @@ def check_dexscreener():
                 trade_url = f"https://dexscreener.com/{chain}/{addr}"
                 chain_label = chain.upper()
 
+            # ★ 修正ポイント：addr[:20] を addr に変更（フル表示）
             msg = (
                 f"🚀 <b>[DEX/{chain_label}] 新規トークン検知！</b>\n\n"
                 f"チェーン: {chain_label}\n"
                 f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"アドレス: <code>{addr[:20]}...</code>\n\n"
+                f"アドレス: <code>{addr}</code>\n\n"
                 f"⚠️ 高リスク・高リターン（詐欺注意）\n"
                 f"📊 https://dexscreener.com/{chain}/{addr}\n"
                 f"🔗 {trade_url}"
             )
             send_telegram(msg)
-            print(f"[DEX新規] chain={chain} addr={addr[:20]}")
+            print(f"[DEX新規] chain={chain} addr={addr}")
 
     except Exception as e:
         print(f"DexScreenerエラー: {e}")
 
-
 def main():
     print("通知ボットくん 起動中...")
-    send_telegram(
-        "✅ <b>通知ボットくん 起動しました！</b>\n\n"
-        "📊 監視対象：\n"
-        "🏦 CEX: Bitget取引所（60秒ごと）\n"
-        "🚀 DEX: DexScreener 全チェーン（60秒ごと）\n\n"
-        "新規トークンを検知したらすぐに通知します！"
-    )
+    send_telegram("✅ <b>通知ボットくん 起動しました！</b>")
 
     loop = 0
     while True:
         check_cex_listings()
         check_dexscreener()
-        time.sleep(60)
+        # 429エラーを避けるため、チェック間隔を少し長め(90秒)にするのがおすすめ
+        time.sleep(90)
         loop += 1
         if loop % 10 == 0:
-            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} DEX={len(known_dex_tokens)}")
-
-
-if __name__ == "__main__":
-    main()
+            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} DEX={len(known_dex_
