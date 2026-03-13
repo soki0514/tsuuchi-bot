@@ -8,9 +8,8 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
-SOLANA_RPC = "https://api.mainnet-beta.solana.com"
+SOLANA_RPC = "https://rpc.ankr.com/solana"  # ← Ankrに変更（制限緩い）
 
-# Pump.funのプログラムアドレス（Solanaブロックチェーン上）
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
 HEADERS = {
@@ -44,7 +43,6 @@ def send_telegram(message):
 
 
 def solana_rpc(method, params):
-    """Solana RPCを呼び出す"""
     try:
         payload = {
             "jsonrpc": "2.0",
@@ -54,14 +52,19 @@ def solana_rpc(method, params):
         }
         r = requests.post(SOLANA_RPC, json=payload, timeout=15)
         if r.status_code == 200:
-            return r.json().get('result')
+            data = r.json()
+            if data.get('error'):
+                print(f"[RPC Error] {method}: {data['error']}")
+                return None
+            return data.get('result')
+        else:
+            print(f"[RPC HTTPエラー] {method}: {r.status_code}")
     except Exception as e:
         print(f"Solana RPCエラー ({method}): {e}")
     return None
 
 
 def get_new_pumpfun_transactions():
-    """Pump.funプログラムの新しいトランザクションを取得"""
     global last_signature
     try:
         params = [PUMPFUN_PROGRAM, {"limit": 20, "commitment": "confirmed"}]
@@ -70,9 +73,11 @@ def get_new_pumpfun_transactions():
 
         result = solana_rpc("getSignaturesForAddress", params)
         if not result:
+            print("[DEBUG] getSignaturesForAddress: 結果なし")
             return []
 
-        # 最新のシグネチャを記録
+        print(f"[DEBUG] 取得TX数: {len(result)}")
+
         if result:
             last_signature = result[0].get('signature', '')
 
@@ -83,16 +88,16 @@ def get_new_pumpfun_transactions():
 
 
 def parse_new_token(signature):
-    """トランザクションから新規トークンのmintアドレスを抽出"""
     try:
+        print(f"[DEBUG] TX解析中: {signature[:20]}")
         result = solana_rpc("getTransaction", [
             signature,
             {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
         ])
         if not result:
+            print(f"[DEBUG] getTransaction返答なし: {signature[:20]}")
             return None
 
-        # postTokenBalancesに存在してpreTokenBalancesにないmintを探す
         post_balances = result.get('meta', {}).get('postTokenBalances', [])
         pre_balances = result.get('meta', {}).get('preTokenBalances', [])
         pre_mints = {b.get('mint') for b in pre_balances}
@@ -103,7 +108,6 @@ def parse_new_token(signature):
                 print(f"[新規mint発見] {mint[:20]}")
                 return mint
 
-        # ログメッセージからも確認（デバッグ用）
         log_messages = result.get('meta', {}).get('logMessages', [])
         for log in log_messages:
             print(f"[TX log] {log[:80]}")
@@ -114,7 +118,6 @@ def parse_new_token(signature):
 
 
 def analyze_wallets(token_address):
-    """直近取引のウォレット多様性を分析"""
     try:
         sigs_result = solana_rpc("getSignaturesForAddress", [
             token_address, {"limit": 50}
@@ -177,7 +180,6 @@ def analyze_wallets(token_address):
 
 
 def analyze_dexscreener(token_address):
-    """DexScreenerで流動性・価格データを取得"""
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
         response = requests.get(url, headers=HEADERS, timeout=10)
@@ -237,7 +239,6 @@ def check_cex_listings():
 
 
 def check_pumpfun_onchain():
-    """Solanaブロックチェーンを直接監視してPump.fun新規トークンを検知"""
     global known_token_mints
 
     txns = get_new_pumpfun_transactions()
@@ -249,7 +250,6 @@ def check_pumpfun_onchain():
         if not sig:
             continue
 
-        # エラーのあるトランザクションはスキップ
         if tx_info.get('err'):
             continue
 
@@ -260,17 +260,12 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun新規] mint={mint[:20]} 分析開始...")
 
-        # 30秒待ってから分析
         time.sleep(30)
 
-        # DexScreener分析
         dex = analyze_dexscreener(mint)
-
-        # ウォレット分析
         print(f"[Pump.fun] ウォレット分析中... {mint[:20]}")
         wallet_data = analyze_wallets(mint)
 
-        # 価格データ
         if dex:
             dex_text = (
                 f"💧 流動性: ${dex['liquidity']:,.0f}\n"
@@ -280,7 +275,6 @@ def check_pumpfun_onchain():
         else:
             dex_text = "📊 価格データ取得中...\n"
 
-        # ウォレット分析
         if wallet_data:
             top5_lines = "\n".join(wallet_data['top5_detail'])
             wallet_text = (
@@ -324,7 +318,6 @@ def main():
         "・ウォレット多様性（自作自演チェック）"
     )
 
-    # 初回：最新シグネチャを記録するだけ
     print("[Pump.fun] 初期化中...")
     init_sigs = solana_rpc("getSignaturesForAddress", [
         PUMPFUN_PROGRAM, {"limit": 5}
@@ -333,6 +326,8 @@ def main():
         global last_signature
         last_signature = init_sigs[0].get('signature', '')
         print(f"[Pump.fun] 初期化完了 最新sig={last_signature[:20]}")
+    else:
+        print("[Pump.fun] 初期化失敗 - RPC接続を確認してください")
 
     loop = 0
     while True:
