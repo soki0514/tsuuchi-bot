@@ -7,8 +7,10 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
+PUMPFUN_URL = "https://frontend-api.pump.fun/coins?offset=0&limit=50&sort=created_timestamp&order=DESC&includeNsfw=false"
 
-known_symbols = set()
+known_cex_symbols = set()
+known_dex_tokens = set()
 
 
 def send_telegram(message):
@@ -17,13 +19,14 @@ def send_telegram(message):
         requests.post(url, json={
             "chat_id": CHAT_ID,
             "text": message,
-            "parse_mode": "HTML"
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
         }, timeout=10)
     except Exception as e:
         print(f"Telegram送信エラー: {e}")
 
 
-def get_symbols():
+def get_cex_symbols():
     try:
         response = requests.get(BITGET_SYMBOLS_URL, timeout=10)
         data = response.json()
@@ -38,66 +41,92 @@ def get_symbols():
     return set()
 
 
-def check_trust_score(symbol):
-    """
-    簡易的な信頼スコア判定
-    USDTペアのみ対象（流動性が高い）
-    """
-    if not symbol.endswith('USDT'):
-        return False, "USDTペアではない"
-
-    # 既知の怪しいパターンを除外（例：テストトークン）
-    suspicious_keywords = ['TEST', 'SCAM', 'FAKE', 'DEMO']
-    base = symbol.replace('USDT', '')
-    for kw in suspicious_keywords:
-        if kw in base.upper():
-            return False, f"怪しいキーワード検出: {kw}"
-
-    return True, "基本チェック通過"
-
-
-def check_new_listings():
-    global known_symbols
-
-    current_symbols = get_symbols()
-
-    if not known_symbols:
-        known_symbols = current_symbols
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 初期化完了: {len(known_symbols)}ペアを監視中")
+def check_cex_listings():
+    global known_cex_symbols
+    current = get_cex_symbols()
+    if not known_cex_symbols:
+        known_cex_symbols = current
+        print(f"[CEX] 初期化完了: {len(known_cex_symbols)}ペア監視中")
         return
-
-    new_symbols = current_symbols - known_symbols
-
-    for symbol in new_symbols:
-        passed, reason = check_trust_score(symbol)
-
-        if passed:
-            message = (
-                f"🚨 <b>新規上場検知！</b>\n\n"
-                f"トークン: <b>{symbol}</b>\n"
-                f"時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"✅ {reason}\n\n"
-                f"⚡ Bitget Walletで確認して、30分以内に利確を検討！"
+    for symbol in current - known_cex_symbols:
+        if symbol.endswith('USDT'):
+            base = symbol.replace('USDT', '')
+            msg = (
+                f"🏦 <b>[CEX] Bitget新規上場！</b>\n\n"
+                f"トークン: <b>${base}</b>\n"
+                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                f"✅ Bitget審査済み（比較的安全）\n"
+                f"🔗 https://www.bitget.com/spot/{base}USDT_SPBL"
             )
-            send_telegram(message)
-            print(f"[新規上場] {symbol} → 通知送信")
-        else:
-            print(f"[スキップ] {symbol} → {reason}")
+            send_telegram(msg)
+            print(f"[CEX新規] {symbol}")
+    known_cex_symbols = current
 
-    known_symbols = current_symbols
+
+def check_pumpfun():
+    global known_dex_tokens
+    try:
+        response = requests.get(PUMPFUN_URL, timeout=10)
+        coins = response.json()
+        if not isinstance(coins, list):
+            return
+
+        if not known_dex_tokens:
+            for coin in coins:
+                mint = coin.get('mint', '')
+                if mint:
+                    known_dex_tokens.add(mint)
+            print(f"[DEX] 初期化完了: {len(known_dex_tokens)}トークン記憶")
+            return
+
+        for coin in coins:
+            mint = coin.get('mint', '')
+            if not mint or mint in known_dex_tokens:
+                continue
+            known_dex_tokens.add(mint)
+
+            market_cap = coin.get('usd_market_cap', 0) or 0
+            name = coin.get('name', '?')
+            symbol = coin.get('symbol', '?')
+            replies = coin.get('reply_count', 0) or 0
+
+            if market_cap >= 20000 and replies >= 3:
+                msg = (
+                    f"🚀 <b>[DEX/Solana] 新規ミームコイン！</b>\n\n"
+                    f"名前: <b>{name} (${symbol})</b>\n"
+                    f"時価総額: ${market_cap:,.0f}\n"
+                    f"コメント数: {replies}件\n"
+                    f"時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                    f"⚠️ 高リスク・高リターン\n"
+                    f"🔗 https://pump.fun/{mint}"
+                )
+                send_telegram(msg)
+                print(f"[DEX新規] {name} ${symbol} MC=${market_cap:,.0f}")
+
+    except Exception as e:
+        print(f"Pump.funエラー: {e}")
 
 
 def main():
     print("通知ボットくん 起動中...")
     send_telegram(
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
-        "Bitgetの新規上場トークンを60秒ごとに監視しています。\n"
-        "新規USDTペアが上場したらすぐに通知します！"
+        "📊 監視対象：\n"
+        "🏦 CEX: Bitget取引所（60秒ごと）\n"
+        "🚀 DEX: Pump.fun Solanaミームコイン（30秒ごと）\n\n"
+        "新規トークンを検知したらすぐに通知します！"
     )
 
+    loop = 0
     while True:
-        check_new_listings()
-        time.sleep(60)  # 60秒ごとにチェック
+        check_cex_listings()
+        check_pumpfun()
+        time.sleep(30)
+        check_pumpfun()
+        time.sleep(30)
+        loop += 1
+        if loop % 20 == 0:
+            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 CEX={len(known_cex_symbols)} DEX={len(known_dex_tokens)}")
 
 
 if __name__ == "__main__":
