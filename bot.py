@@ -6,9 +6,10 @@ from collections import Counter
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
+HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
-SOLANA_RPC = "https://rpc.ankr.com/solana"  # ← Ankrに変更（制限緩い）
+SOLANA_RPC = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
 
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
