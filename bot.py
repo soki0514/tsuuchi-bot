@@ -12,13 +12,6 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
 # ── エンドポイント ────────────────────────────────────────────────────────────
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
-# Pump.fun API: 530エラー対策として複数URLを順番に試す
-PUMPFUN_API_URLS = [
-    "https://frontend-api.pump.fun/coins",
-    "https://frontend-api-v2.pump.fun/coins",
-    "https://client-api-2-74b1891ee9f9.herokuapp.com/coins",
-    "https://pumpapi.fun/api/coins",
-]
 SOLANA_RPC = (
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
     if HELIUS_KEY
@@ -65,23 +58,10 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-# pump.fun専用ヘッダー: CloudflareのBot検知を回避するためOrigin/Refererを付与
-PUMPFUN_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Origin": "https://pump.fun",
-    "Referer": "https://pump.fun/",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-site",
-}
-
 # ── グローバル状態 ────────────────────────────────────────────────────────────
-known_cex_symbols      = set()
-known_token_mints      = set()
-known_pumpfun_api_mints = set()
-last_signature         = None
+known_cex_symbols = set()
+known_token_mints = set()
+last_signature    = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -212,7 +192,6 @@ def evm_rpc(chain, method, params):
                     data = r.json()
                     if "error" in data:
                         err = data["error"]
-                        # "no response"などは次のRPCへ
                         print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
                         break  # このRPCを諦め次のURLへ
                     return data.get("result")
@@ -382,7 +361,6 @@ def check_evm_chain(chain):
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
 
-        # FIX: from_block = last_block+1（-20キャップ削除でブロック漏れ防止）
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
@@ -414,7 +392,6 @@ def check_evm_chain(chain):
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
 
-            # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain),
@@ -494,34 +471,13 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
+            oldest     = sigs[-1]
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
+        time.sleep(10)
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
-
-
-def solana_count_trades(token_address, first_trade_time):
-    """初取引から3分間のトランザクション数をカウント"""
-    sigs = solana_rpc("getSignaturesForAddress", [
-        token_address, {"limit": 200, "commitment": "confirmed"},
-    ])
-    if not sigs:
-        return 0
-    cutoff = first_trade_time + 180
-    count  = 0
-    for sig_info in sigs:  # 降順（新→旧）
-        bt = sig_info.get("blockTime", 0)
-        if not bt:
-            continue
-        if bt > cutoff:
-            continue       # ウィンドウより新しい → スキップ
-        if bt < first_trade_time:
-            break          # ウィンドウより古い → 終了
-        count += 1
-    return count
 
 
 def analyze_wallets(token_address):
@@ -553,8 +509,9 @@ def analyze_wallets(token_address):
 
 def _process_solana_token(mint):
     """
-    新規Solanaトークンの待機・フィルター・通知を別スレッドで実行。
-    このスレッドが動いている間もメインループは他のトークンを検知し続ける。
+    新規Solanaトークンの2段階通知。
+    STEP A (60秒後): ユニーク50人以上 → 🟣 早期通知
+    STEP B (180秒後): ユニーク30人以上 → 🚀 確定通知（ウォレット分析付き）
     """
     try:
         # STEP 1: 初取引を待つ（最大5分）
@@ -563,25 +520,50 @@ def _process_solana_token(mint):
             print(f"[Pump.fun] 初取引なし → スキップ: {mint[:20]}")
             return
 
-        # STEP 2: 初取引から3分待機
-        wait_remaining = max(0, 180 - (time.time() - first_trade_time))
-        if wait_remaining > 0:
-            print(f"[Pump.fun] 3分フィルター待機中 ({wait_remaining:.0f}秒)..."
-                  f" ※メインループは継続中")
-            time.sleep(wait_remaining)
+        # ── STEP A: 初取引から60秒後 → 早期チェック ──────────────────────────
+        wait_early = max(0, 60 - (time.time() - first_trade_time))
+        if wait_early > 0:
+            time.sleep(wait_early)
 
-        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
-        # ※Solanaは70TXを分析・EVMと同じ30ユニーク基準に統一
+        early_data   = analyze_wallets(mint)
+        early_unique = early_data["unique_wallets"] if early_data else 0
+        print(f"[Pump.fun] 早期チェック(60秒): {early_unique}人")
+
+        if early_unique >= 50:
+            dex = analyze_dexscreener(mint)
+            dex_text = (
+                f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+                f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
+            ) if dex else "📊 価格データ取得中...\n"
+            msg = (
+                f"🟣 <b>[Pump.fun] ボンカーブ早期検知！</b>\n\n"
+                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"Mint: <code>{mint}</code>\n\n"
+                f"👥 取引アドレス: <b>{early_unique}人</b>\n\n"
+                f"{dex_text}\n"
+                f"⚡ ボンディングカーブ中（Raydium未移行）\n\n"
+                f"📊 https://dexscreener.com/solana/{mint}\n"
+                f"🔗 https://pump.fun/{mint}"
+            )
+            send_telegram(msg)
+            print(f"[Pump.fun] 🟣 早期通知送信完了: {mint[:20]}")
+
+        # ── STEP B: 初取引から180秒後 → 確定チェック ─────────────────────────
+        wait_final = max(0, 180 - (time.time() - first_trade_time))
+        if wait_final > 0:
+            print(f"[Pump.fun] 確定チェック待機中 ({wait_final:.0f}秒)...")
+            time.sleep(wait_final)
+
         wallet_data  = analyze_wallets(mint)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
-        print(f"[Pump.fun] 3分間ユニークアドレス: {unique_count}人")
+        print(f"[Pump.fun] 確定チェック(180秒): {unique_count}人")
         if unique_count < 30:
             print(f"[Pump.fun] フィルター不合格 ({unique_count} < 30人) → スキップ")
             return
 
-        print(f"[Pump.fun] ✅ フィルター合格！通知送信中...")
+        print(f"[Pump.fun] ✅ フィルター合格！🚀通知送信中...")
 
-        # STEP 4: 通知
         dex = analyze_dexscreener(mint)
         wallet_text, wallet_judge = format_wallet_output(wallet_data)
         dex_text = (
@@ -601,7 +583,7 @@ def _process_solana_token(mint):
             f"🔗 https://pump.fun/{mint}"
         )
         send_telegram(msg)
-        print(f"[Pump.fun] 通知送信完了: {mint[:20]}")
+        print(f"[Pump.fun] 🚀 確定通知送信完了: {mint[:20]}")
 
     except Exception as e:
         print(f"[Pump.fun] スレッドエラー ({mint[:20]}): {e}")
@@ -632,94 +614,12 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
 
-        # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
         t = threading.Thread(
             target=_process_solana_token,
             args=(mint,),
             daemon=True,
         )
         t.start()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun ボンディングカーブ監視（Raydium移行前・早期検知）
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _fetch_pumpfun_coins():
-    """
-    PUMPFUN_API_URLSを順番に試してcoinsリストを返す。
-    全て失敗した場合はNoneを返す。
-    """
-    params = {
-        "offset": 0, "limit": 20,
-        "sort": "created_timestamp", "order": "DESC", "includeNsfw": "true",
-    }
-    for url in PUMPFUN_API_URLS:
-        try:
-            r = requests.get(url, params=params, headers=PUMPFUN_HEADERS, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                if isinstance(data, list):
-                    return data
-                print(f"[Pump.fun API] 予期しないレスポンス ({url.split('/')[2]}): {str(data)[:80]}")
-            else:
-                print(f"[Pump.fun API] HTTP {r.status_code} ({url.split('/')[2]}) → 次のURLへ")
-        except Exception as e:
-            print(f"[Pump.fun API] 接続エラー ({url.split('/')[2]}): {e}")
-    return None
-
-
-def check_pumpfun_api():
-    """
-    pump.fun APIで新規ボンディングカーブトークンを検知。
-    条件: 保有アドレス50人以上 & Raydium未移行
-    """
-    global known_pumpfun_api_mints
-    try:
-        coins = _fetch_pumpfun_coins()
-        if coins is None:
-            return  # 全URL失敗（ログは_fetch_pumpfun_coins内で出力済み）
-
-        for coin in coins:
-            mint = coin.get("mint", "")
-            if not mint or mint in known_pumpfun_api_mints:
-                continue
-
-            # 卒業済み（Raydium移行済み）はスキップ
-            if coin.get("complete", False):
-                known_pumpfun_api_mints.add(mint)
-                continue
-
-            # フィルター: 取引アドレス50人以上
-            holders = coin.get("holder_count", 0) or 0
-            if holders < 50:
-                continue
-
-            known_pumpfun_api_mints.add(mint)
-
-            name       = coin.get("name", "不明")
-            symbol     = coin.get("symbol", "?")
-            market_cap = coin.get("usd_market_cap", 0) or 0
-            replies    = coin.get("reply_count", 0) or 0
-            grad_pct   = min(market_cap / 69000 * 100, 100)
-
-            msg = (
-                f"🟣 <b>[Pump.fun] ボンカーブ早期検知！</b>\n\n"
-                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"名前: <b>{name} (${symbol})</b>\n"
-                f"Mint: <code>{mint}</code>\n\n"
-                f"👥 取引アドレス: <b>{holders}人</b>\n"
-                f"💰 時価総額: ${market_cap:,.0f}\n"
-                f"📈 卒業進捗: {grad_pct:.1f}% (目標$69,000)\n"
-                f"💬 コメント: {replies}件\n\n"
-                f"⚡ Raydium移行前・ボンディングカーブ中\n\n"
-                f"📊 https://pump.fun/{mint}"
-            )
-            send_telegram(msg)
-            print(f"[Pump.fun API] 早期通知: {name} (${symbol}) holders={holders}")
-
-    except Exception as e:
-        print(f"[Pump.fun API] エラー: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -773,13 +673,13 @@ def main():
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
         "📊 監視対象：\n"
         "🏦 CEX: Bitget取引所（新規上場）\n"
-        "🟣 DEX: Pump.fun ボンカーブ（早期検知）\n"
-        "🚀 DEX: Pump.fun → Raydium移行後（30人フィルター）\n"
+        "🟣 Pump.fun 早期検知（60秒・50人）\n"
+        "🚀 Pump.fun 確定通知（3分・30人）\n"
         "🟡 DEX: FourMeme / BSC\n"
         "🔵 DEX: Clanker / Base\n\n"
         "🔍 フィルター条件：\n"
-        "・ボンカーブ: 取引アドレス50人以上で即通知\n"
-        "・Raydium後: 3分間ユニークアドレス30人以上\n"
+        "・60秒後 ユニーク50人以上 → 🟣 即通知\n"
+        "・3分後 ユニーク30人以上 → 🚀 確定通知\n"
         "・並列処理で待機中も他チェーンを継続監視"
     )
 
@@ -791,35 +691,21 @@ def main():
         last_signature = init_sigs[0].get("signature", "")
         print(f"[Pump.fun] 初期化完了 sig={last_signature[:20]}")
 
-    # pump.fun API初期化: 起動時点の既存トークンを無視（フォールバックURL対応）
-    print("[Pump.fun API] 初期化中...")
-    init_coins = _fetch_pumpfun_coins()
-    if init_coins is not None:
-        for coin in init_coins:
-            mint = coin.get("mint", "")
-            if mint:
-                known_pumpfun_api_mints.add(mint)
-        print(f"[Pump.fun API] 初期化完了: {len(known_pumpfun_api_mints)}件スキップ")
-    else:
-        print("[Pump.fun API] 初期化失敗: 全URLがエラー → ボンカーブ監視は次回ループから再試行")
-
     loop = 0
     while True:
         # ── メインループは「検知だけ」、待機は各スレッドが担当 ──
         check_cex_listings()
-        check_pumpfun_api()       # ボンディングカーブ早期検知
-        check_pumpfun_onchain()   # オンチェーン新規mint検知
+        check_pumpfun_onchain()   # オンチェーン新規mint検知（2段階通知）
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
-        time.sleep(30)  # 20→30秒（コスト削減）
+        time.sleep(30)
         loop += 1
         if loop % 30 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            # 稼働中のスレッド数も表示
-            active_threads = threading.active_count() - 1  # メインスレッド除く
+            active_threads = threading.active_count() - 1
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
