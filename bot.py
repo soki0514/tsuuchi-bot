@@ -12,7 +12,11 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
 # ── エンドポイント ────────────────────────────────────────────────────────────
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
-PUMPFUN_API_URL     = "https://frontend-api.pump.fun/coins"
+# Pump.fun API: 530エラー対策として複数URLを順番に試す
+PUMPFUN_API_URLS = [
+    "https://frontend-api.pump.fun/coins",
+    "https://client-api-2-74b1891ee9f9.herokuapp.com/coins",
+]
 SOLANA_RPC = (
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
     if HELIUS_KEY
@@ -28,7 +32,12 @@ PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
-        "rpc": "https://bsc-rpc.publicnode.com",
+        # Binance公式RPC（最安定）→ publicnode フォールバック
+        "rpc_list": [
+            "https://bsc-dataseed1.binance.org",
+            "https://bsc-dataseed2.binance.org",
+            "https://bsc-rpc.publicnode.com",
+        ],
         "contract": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
         "dex_url": "https://dexscreener.com/bsc/{}",
         "launch_url": "https://four.meme",
@@ -36,7 +45,12 @@ EVM_CHAINS = [
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        "rpc": "https://base.llamarpc.com",
+        # BlastAPI → 1RPC → llamarpc の順でフォールバック
+        "rpc_list": [
+            "https://base-mainnet.public.blastapi.io",
+            "https://1rpc.io/base",
+            "https://base.llamarpc.com",
+        ],
         "contract": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
         "dex_url": "https://dexscreener.com/base/{}",
         "launch_url": "https://www.clanker.world",
@@ -49,11 +63,23 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# pump.fun専用ヘッダー: CloudflareのBot検知を回避するためOrigin/Refererを付与
+PUMPFUN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://pump.fun",
+    "Referer": "https://pump.fun/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+}
+
 # ── グローバル状態 ────────────────────────────────────────────────────────────
-known_cex_symbols       = set()
-known_token_mints       = set()
+known_cex_symbols      = set()
+known_token_mints      = set()
 known_pumpfun_api_mints = set()
-last_signature          = None
+last_signature         = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -168,29 +194,39 @@ def analyze_dexscreener(token_address):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def evm_rpc(chain, method, params):
-    for attempt in range(3):
-        try:
-            r = requests.post(chain["rpc"], json={
-                "jsonrpc": "2.0", "id": 1,
-                "method": method, "params": params,
-            }, timeout=20)
-            if r.status_code == 200:
-                data = r.json()
-                if "error" in data:
-                    print(f"[{chain['name']}] RPC Error: {data['error']}")
-                    return None
-                return data.get("result")
-            print(f"[{chain['name']}] RPC HTTPエラー ({method}): {r.status_code}")
-        except Exception as e:
-            print(f"[{chain['name']}] RPC 接続エラー ({method}) attempt{attempt+1}: {e}")
-        if attempt < 2:
-            time.sleep(1)
+    """
+    rpc_list内のRPCを順番に試す。全て失敗した場合はNoneを返す。
+    503/no responseなどでフェイルしたRPCはスキップし次のURLへ。
+    """
+    rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
+    for rpc_url in rpc_list:
+        for attempt in range(2):  # 各RPCは2回まで試す
+            try:
+                r = requests.post(rpc_url, json={
+                    "jsonrpc": "2.0", "id": 1,
+                    "method": method, "params": params,
+                }, timeout=15)
+                if r.status_code == 200:
+                    data = r.json()
+                    if "error" in data:
+                        err = data["error"]
+                        # "no response"などは次のRPCへ
+                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
+                        break  # このRPCを諦め次のURLへ
+                    return data.get("result")
+                print(f"[{chain['name']}] HTTP {r.status_code} ({rpc_url.split('/')[2]}) → 次のRPCへ")
+                break  # 4xx/5xxは即次のRPCへ
+            except Exception as e:
+                print(f"[{chain['name']}] 接続エラー ({rpc_url.split('/')[2]}) attempt{attempt+1}: {e}")
+                if attempt < 1:
+                    time.sleep(1)
     return None
 
 
 def evm_wait_for_first_trade(token_address, chain, timeout=300):
+    """初Transferイベントを待つ。成功: (block, time) / タイムアウト: (None, None)"""
     print(f"[{chain['name']}] 初取引待機中: {token_address[:16]}...")
-    deadline   = time.time() + timeout
+    deadline  = time.time() + timeout
     latest_hex = evm_rpc(chain, "eth_blockNumber", [])
     scan_from  = int(latest_hex, 16) - 5 if latest_hex else 0
 
@@ -218,6 +254,7 @@ def evm_wait_for_first_trade(token_address, chain, timeout=300):
 
 
 def evm_count_trades(token_address, from_block, chain):
+    """from_block〜最新ブロックのTransferイベント数を返す"""
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
@@ -268,18 +305,25 @@ def evm_analyze_wallets(token_address, chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_token(token_address, chain):
+    """
+    新規EVMトークンの待機・フィルター・通知を別スレッドで実行。
+    このスレッドが動いている間もメインループは他のチェーン/トークンを検知し続ける。
+    """
     try:
+        # STEP 1: 初取引を待つ（最大5分）
         first_block, first_time = evm_wait_for_first_trade(token_address, chain)
         if not first_block:
             print(f"[{chain['name']}] 初取引なし → スキップ: {token_address[:16]}")
             return
 
+        # STEP 2: 初取引から3分待機
         wait_remaining = max(0, 180 - (time.time() - first_time))
         if wait_remaining > 0:
             print(f"[{chain['name']}] 3分フィルター待機中 ({wait_remaining:.0f}秒)..."
                   f" ※メインループは継続中")
             time.sleep(wait_remaining)
 
+        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
         wallet_data  = evm_analyze_wallets(token_address, chain)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
         print(f"[{chain['name']}] 3分間ユニークアドレス: {unique_count}人")
@@ -289,6 +333,7 @@ def _process_evm_token(token_address, chain):
 
         print(f"[{chain['name']}] ✅ フィルター合格！通知送信中...")
 
+        # STEP 4: 通知
         dex = analyze_dexscreener(token_address)
         wallet_text, wallet_judge = format_wallet_output(wallet_data)
         dex_text = (
@@ -315,21 +360,27 @@ def _process_evm_token(token_address, chain):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EVM チェーン監視
+# EVM チェーン監視（メインループから呼ばれる・即リターン）
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
+    """
+    新規トークンを検知したらすぐ別スレッドへ渡してリターン。
+    待機処理は一切ここではやらない。
+    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
 
+        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
 
+        # FIX: from_block = last_block+1（-20キャップ削除でブロック漏れ防止）
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
@@ -361,6 +412,7 @@ def check_evm_chain(chain):
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
 
+            # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain),
@@ -432,6 +484,7 @@ def parse_new_token(signature):
 
 
 def wait_for_first_trade(token_address, timeout=300):
+    """初取引を待つ。成功: (first_trade_time, count) / タイムアウト: (None, 0)"""
     print(f"[Pump.fun] 初取引待機中: {token_address[:20]}...")
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -439,16 +492,17 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]
+            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)
+        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
 
 
 def solana_count_trades(token_address, first_trade_time):
+    """初取引から3分間のトランザクション数をカウント"""
     sigs = solana_rpc("getSignaturesForAddress", [
         token_address, {"limit": 200, "commitment": "confirmed"},
     ])
@@ -456,14 +510,14 @@ def solana_count_trades(token_address, first_trade_time):
         return 0
     cutoff = first_trade_time + 180
     count  = 0
-    for sig_info in sigs:
+    for sig_info in sigs:  # 降順（新→旧）
         bt = sig_info.get("blockTime", 0)
         if not bt:
             continue
         if bt > cutoff:
-            continue
+            continue       # ウィンドウより新しい → スキップ
         if bt < first_trade_time:
-            break
+            break          # ウィンドウより古い → 終了
         count += 1
     return count
 
@@ -496,18 +550,26 @@ def analyze_wallets(token_address):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_solana_token(mint):
+    """
+    新規Solanaトークンの待機・フィルター・通知を別スレッドで実行。
+    このスレッドが動いている間もメインループは他のトークンを検知し続ける。
+    """
     try:
+        # STEP 1: 初取引を待つ（最大5分）
         first_trade_time, _ = wait_for_first_trade(mint)
         if not first_trade_time:
             print(f"[Pump.fun] 初取引なし → スキップ: {mint[:20]}")
             return
 
+        # STEP 2: 初取引から3分待機
         wait_remaining = max(0, 180 - (time.time() - first_trade_time))
         if wait_remaining > 0:
             print(f"[Pump.fun] 3分フィルター待機中 ({wait_remaining:.0f}秒)..."
                   f" ※メインループは継続中")
             time.sleep(wait_remaining)
 
+        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
+        # ※Solanaは70TXを分析・EVMと同じ30ユニーク基準に統一
         wallet_data  = analyze_wallets(mint)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
         print(f"[Pump.fun] 3分間ユニークアドレス: {unique_count}人")
@@ -517,6 +579,7 @@ def _process_solana_token(mint):
 
         print(f"[Pump.fun] ✅ フィルター合格！通知送信中...")
 
+        # STEP 4: 通知
         dex = analyze_dexscreener(mint)
         wallet_text, wallet_judge = format_wallet_output(wallet_data)
         dex_text = (
@@ -543,10 +606,14 @@ def _process_solana_token(mint):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun 監視（オンチェーン）
+# Pump.fun 監視（メインループから呼ばれる・即リターン）
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_pumpfun_onchain():
+    """
+    新規mintを検知したらすぐ別スレッドへ渡してリターン。
+    待機処理は一切ここではやらない。
+    """
     global known_token_mints
     txns = get_new_pumpfun_transactions()
     if not txns:
@@ -555,7 +622,7 @@ def check_pumpfun_onchain():
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
             continue
-        time.sleep(0.2)
+        time.sleep(0.2)  # Heliusレート制限対策
         mint = parse_new_token(sig)
         if not mint or mint in known_token_mints:
             continue
@@ -563,6 +630,7 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
 
+        # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
         t = threading.Thread(
             target=_process_solana_token,
             args=(mint,),
@@ -575,6 +643,30 @@ def check_pumpfun_onchain():
 # Pump.fun ボンディングカーブ監視（Raydium移行前・早期検知）
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _fetch_pumpfun_coins():
+    """
+    PUMPFUN_API_URLSを順番に試してcoinsリストを返す。
+    全て失敗した場合はNoneを返す。
+    """
+    params = {
+        "offset": 0, "limit": 20,
+        "sort": "created_timestamp", "order": "DESC", "includeNsfw": "true",
+    }
+    for url in PUMPFUN_API_URLS:
+        try:
+            r = requests.get(url, params=params, headers=PUMPFUN_HEADERS, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    return data
+                print(f"[Pump.fun API] 予期しないレスポンス ({url.split('/')[2]}): {str(data)[:80]}")
+            else:
+                print(f"[Pump.fun API] HTTP {r.status_code} ({url.split('/')[2]}) → 次のURLへ")
+        except Exception as e:
+            print(f"[Pump.fun API] 接続エラー ({url.split('/')[2]}): {e}")
+    return None
+
+
 def check_pumpfun_api():
     """
     pump.fun APIで新規ボンディングカーブトークンを検知。
@@ -582,30 +674,21 @@ def check_pumpfun_api():
     """
     global known_pumpfun_api_mints
     try:
-        r = requests.get(PUMPFUN_API_URL, params={
-            "offset": 0,
-            "limit": 20,
-            "sort": "created_timestamp",
-            "order": "DESC",
-            "includeNsfw": "true",
-        }, headers=HEADERS, timeout=10)
-        if r.status_code != 200:
-            print(f"[Pump.fun API] HTTPエラー: {r.status_code} → {r.text[:100]}")
-            return
-        coins = r.json()
-        if not isinstance(coins, list):
-            print(f"[Pump.fun API] 予期しないレスポンス: {str(coins)[:100]}")
-            return
+        coins = _fetch_pumpfun_coins()
+        if coins is None:
+            return  # 全URL失敗（ログは_fetch_pumpfun_coins内で出力済み）
 
         for coin in coins:
             mint = coin.get("mint", "")
             if not mint or mint in known_pumpfun_api_mints:
                 continue
 
+            # 卒業済み（Raydium移行済み）はスキップ
             if coin.get("complete", False):
                 known_pumpfun_api_mints.add(mint)
                 continue
 
+            # フィルター: 取引アドレス50人以上
             holders = coin.get("holder_count", 0) or 0
             if holders < 50:
                 continue
@@ -688,17 +771,17 @@ def main():
         "✅ <b>通知ボットくん 起動しました！</b>\n\n"
         "📊 監視対象：\n"
         "🏦 CEX: Bitget取引所（新規上場）\n"
-        "🟣 DEX: Pump.fun ボンカーブ（取引50人以上）\n"
-        "🚀 DEX: Pump.fun / Solana（3分30ユニーク）\n"
+        "🟣 DEX: Pump.fun ボンカーブ（早期検知）\n"
+        "🚀 DEX: Pump.fun → Raydium移行後（30人フィルター）\n"
         "🟡 DEX: FourMeme / BSC\n"
         "🔵 DEX: Clanker / Base\n\n"
         "🔍 フィルター条件：\n"
-        "・ボンカーブ: 取引アドレス50人以上\n"
-        "・Solana/EVM: 3分間ユニーク30人以上\n"
-        "・並列処理で待機中も他チェーンを継続監視\n"
-        "・ウォレット多様性（自作自演チェック）付き"
+        "・ボンカーブ: 取引アドレス50人以上で即通知\n"
+        "・Raydium後: 3分間ユニークアドレス30人以上\n"
+        "・並列処理で待機中も他チェーンを継続監視"
     )
 
+    # Solana初期化: 起動時点の最新sigを記録し、過去mintを無視
     print("[Pump.fun] 初期化中...")
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
@@ -706,48 +789,40 @@ def main():
         last_signature = init_sigs[0].get("signature", "")
         print(f"[Pump.fun] 初期化完了 sig={last_signature[:20]}")
 
+    # pump.fun API初期化: 起動時点の既存トークンを無視（フォールバックURL対応）
     print("[Pump.fun API] 初期化中...")
-    try:
-        r = requests.get(PUMPFUN_API_URL, params={
-            "offset": 0, "limit": 20,
-            "sort": "created_timestamp", "order": "DESC", "includeNsfw": "true",
-        }, headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list):
-                for coin in data:
-                    mint = coin.get("mint", "")
-                    if mint:
-                        known_pumpfun_api_mints.add(mint)
-                print(f"[Pump.fun API] 初期化完了: {len(known_pumpfun_api_mints)}件スキップ")
-            else:
-                print(f"[Pump.fun API] 初期化: 予期しないレスポンス形式 → {str(data)[:100]}")
-        else:
-            print(f"[Pump.fun API] 初期化HTTPエラー: {r.status_code} → {r.text[:100]}")
-    except Exception as e:
-        print(f"[Pump.fun API] 初期化エラー: {e}")
+    init_coins = _fetch_pumpfun_coins()
+    if init_coins is not None:
+        for coin in init_coins:
+            mint = coin.get("mint", "")
+            if mint:
+                known_pumpfun_api_mints.add(mint)
+        print(f"[Pump.fun API] 初期化完了: {len(known_pumpfun_api_mints)}件スキップ")
+    else:
+        print("[Pump.fun API] 初期化失敗: 全URLがエラー → ボンカーブ監視は次回ループから再試行")
 
     loop = 0
     while True:
+        # ── メインループは「検知だけ」、待機は各スレッドが担当 ──
         check_cex_listings()
-        check_pumpfun_api()
-        check_pumpfun_onchain()
+        check_pumpfun_api()       # ボンディングカーブ早期検知
+        check_pumpfun_onchain()   # オンチェーン新規mint検知
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
-        time.sleep(30)
+        time.sleep(30)  # 20→30秒（コスト削減）
         loop += 1
         if loop % 30 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            active_threads = threading.active_count() - 1
+            # 稼働中のスレッド数も表示
+            active_threads = threading.active_count() - 1  # メインスレッド除く
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
-                f"Solana={len(known_token_mints)} "
-                f"BondingCurve={len(known_pumpfun_api_mints)} "
-                f"{evm_status} 監視スレッド={active_threads}"
+                f"Solana={len(known_token_mints)} {evm_status} "
+                f"監視スレッド={active_threads}"
             )
 
 
