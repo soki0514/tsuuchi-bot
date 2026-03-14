@@ -1,15 +1,14 @@
 import requests
 import time
 import os
+import threading
 from datetime import datetime
 from collections import Counter
 
-# ── 環境変数 ──────────────────────────────────────────────────────────────────
 BOT_TOKEN  = os.environ.get('BOT_TOKEN')
 CHAT_ID    = os.environ.get('CHAT_ID')
 HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
-# ── エンドポイント ────────────────────────────────────────────────────────────
 BITGET_SYMBOLS_URL = "https://api.bitget.com/api/v2/spot/public/symbols"
 SOLANA_RPC = (
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
@@ -17,12 +16,10 @@ SOLANA_RPC = (
     else "https://api.mainnet-beta.solana.com"
 )
 
-# ── EVM定数 ──────────────────────────────────────────────────────────────────
 TRANSFER_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 ZERO_TOPIC      = "0x0000000000000000000000000000000000000000000000000000000000000000"
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
-# ── 監視チェーン（チェーン追加はここにdictを足すだけ）────────────────────────
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
@@ -44,7 +41,6 @@ EVM_CHAINS = [
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-# ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
@@ -71,15 +67,15 @@ def send_telegram(message):
 
 
 def _build_wallet_stats(wallets):
-    total  = len(wallets)
-    unique = len(set(wallets))
+    total   = len(wallets)
+    unique  = len(set(wallets))
     counter = Counter(wallets)
-    top3 = counter.most_common(3)
-    top3_count = sum(c for _, c in top3)
-    top3_ratio = top3_count / total * 100 if total > 0 else 0
-    max_single = top3[0][1] if top3 else 0
+    top3    = counter.most_common(3)
+    top3_count       = sum(c for _, c in top3)
+    top3_ratio       = top3_count / total * 100 if total > 0 else 0
+    max_single       = top3[0][1] if top3 else 0
     max_single_ratio = max_single / total * 100 if total > 0 else 0
-    top5 = counter.most_common(5)
+    top5        = counter.most_common(5)
     top5_detail = []
     top5_total  = 0
     for i, (addr, cnt) in enumerate(top5):
@@ -163,7 +159,7 @@ def evm_rpc(chain, method, params):
 
 def evm_wait_for_first_trade(token_address, chain, timeout=300):
     print(f"[{chain['name']}] 初取引待機中: {token_address[:16]}...")
-    deadline = time.time() + timeout
+    deadline  = time.time() + timeout
     latest_hex = evm_rpc(chain, "eth_blockNumber", [])
     scan_from  = int(latest_hex, 16) - 5 if latest_hex else 0
     while time.time() < deadline:
@@ -186,24 +182,6 @@ def evm_wait_for_first_trade(token_address, chain, timeout=300):
         time.sleep(5)
     print(f"[{chain['name']}] 初取引タイムアウト: {token_address[:16]}")
     return None, None
-
-
-def evm_count_trades(token_address, from_block, chain):
-    try:
-        latest_hex = evm_rpc(chain, "eth_blockNumber", [])
-        if not latest_hex:
-            return 0
-        to_block = int(latest_hex, 16)
-        logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(to_block),
-            "address":   token_address,
-            "topics":    [TRANSFER_TOPIC],
-        }])
-        return len(logs) if logs else 0
-    except Exception as e:
-        print(f"[{chain['name']}] トレード数カウントエラー: {e}")
-        return 0
 
 
 def evm_analyze_wallets(token_address, chain):
@@ -234,26 +212,71 @@ def evm_analyze_wallets(token_address, chain):
         return None
 
 
+def _process_evm_token(token_address, chain):
+    try:
+        # STEP 1: 初取引を待つ（最大5分）
+        first_block, first_time = evm_wait_for_first_trade(token_address, chain)
+        if not first_block:
+            print(f"[{chain['name']}] 初取引なし → スキップ: {token_address[:16]}")
+            return
+
+        # STEP 2: 初取引から3分待機
+        wait_remaining = max(0, 180 - (time.time() - first_time))
+        if wait_remaining > 0:
+            print(f"[{chain['name']}] 3分フィルター待機中 ({wait_remaining:.0f}秒)... ※メインループは継続中")
+            time.sleep(wait_remaining)
+
+        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
+        wallet_data  = evm_analyze_wallets(token_address, chain)
+        unique_count = wallet_data["unique_wallets"] if wallet_data else 0
+        print(f"[{chain['name']}] 3分間ユニークアドレス: {unique_count}人")
+        if unique_count < 30:
+            print(f"[{chain['name']}] フィルター不合格 ({unique_count} < 30人) → スキップ")
+            return
+
+        print(f"[{chain['name']}] ✅ フィルター合格！通知送信中...")
+
+        # STEP 4: 通知
+        dex = analyze_dexscreener(token_address)
+        wallet_text, wallet_judge = format_wallet_output(wallet_data)
+        dex_text = (
+            f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+            f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+            f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
+        ) if dex else "📊 価格データ取得中...\n"
+        msg = (
+            f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
+            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"アドレス: <code>{token_address}</code>\n"
+            f"👥 3分間ユニーク: <b>{unique_count}人</b>\n\n"
+            f"{dex_text}\n"
+            f"{wallet_text}\n"
+            f"{wallet_judge}\n\n"
+            f"📊 {chain['dex_url'].format(token_address)}\n"
+            f"🔗 {chain['launch_url']}"
+        )
+        send_telegram(msg)
+        print(f"[{chain['name']}] 通知送信完了: {token_address}")
+    except Exception as e:
+        print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
+
+
 def check_evm_chain(chain):
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
-
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
-
-        # ── FIX: max(last+1, latest-20) → last_block+1（ブロック漏れ防止）──
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
             from_block = latest_int - 500
         if from_block > latest_int:
             return
-
         logs = evm_rpc(chain, "eth_getLogs", [{
             "fromBlock": hex(from_block),
             "toBlock":   hex(latest_int),
@@ -261,12 +284,9 @@ def check_evm_chain(chain):
             "topics":    [TRANSFER_TOPIC, ZERO_TOPIC],
         }])
         chain["last_block"] = latest_int
-
         if not logs:
             return
-
         print(f"[{chain['name']}] {len(logs)}件のイベント検知")
-
         for log in logs:
             topics = log.get("topics", [])
             if len(topics) < 3:
@@ -275,52 +295,13 @@ def check_evm_chain(chain):
             if token_address in chain["known_tokens"]:
                 continue
             chain["known_tokens"].add(token_address)
-            print(f"[{chain['name']}] 新規トークン: {token_address}")
-
-            # STEP 1: 初取引待機
-            first_block, first_time = evm_wait_for_first_trade(token_address, chain)
-            if not first_block:
-                print(f"[{chain['name']}] 初取引なし → スキップ")
-                continue
-
-            # STEP 2: 3分待機
-            wait_remaining = max(0, 180 - (time.time() - first_time))
-            if wait_remaining > 0:
-                print(f"[{chain['name']}] 3分フィルター待機中 ({wait_remaining:.0f}秒)...")
-                time.sleep(wait_remaining)
-
-            # STEP 3: 70件フィルター
-            trade_count = evm_count_trades(token_address, first_block, chain)
-            print(f"[{chain['name']}] 3分間取引数: {trade_count}件")
-            if trade_count < 70:
-                print(f"[{chain['name']}] フィルター不合格 ({trade_count} < 70件) → スキップ")
-                continue
-
-            print(f"[{chain['name']}] ✅ フィルター合格！分析中...")
-
-            # STEP 4: 通知
-            dex         = analyze_dexscreener(token_address)
-            wallet_data = evm_analyze_wallets(token_address, chain)
-            wallet_text, wallet_judge = format_wallet_output(wallet_data)
-            dex_text = (
-                f"💧 流動性: ${dex['liquidity']:,.0f}\n"
-                f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-                f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
-            ) if dex else "📊 価格データ取得中...\n"
-            msg = (
-                f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
-                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"アドレス: <code>{token_address}</code>\n"
-                f"🔥 3分間取引数: <b>{trade_count}件</b>\n\n"
-                f"{dex_text}\n"
-                f"{wallet_text}\n"
-                f"{wallet_judge}\n\n"
-                f"📊 {chain['dex_url'].format(token_address)}\n"
-                f"🔗 {chain['launch_url']}"
+            print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
+            t = threading.Thread(
+                target=_process_evm_token,
+                args=(token_address, chain),
+                daemon=True,
             )
-            send_telegram(msg)
-            print(f"[{chain['name']}] 通知送信完了: {token_address}")
-
+            t.start()
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
@@ -388,33 +369,13 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
+            oldest     = sigs[-1]
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
         time.sleep(5)
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
-
-
-def solana_count_trades(token_address, first_trade_time):
-    sigs = solana_rpc("getSignaturesForAddress", [
-        token_address, {"limit": 200, "commitment": "confirmed"},
-    ])
-    if not sigs:
-        return 0
-    cutoff = first_trade_time + 180
-    count  = 0
-    for sig_info in sigs:  # 降順（新→旧）
-        bt = sig_info.get("blockTime", 0)
-        if not bt:
-            continue
-        if bt > cutoff:
-            continue       # ウィンドウより新しい → スキップ
-        if bt < first_trade_time:
-            break          # ウィンドウより古い → 終了
-        count += 1
-    return count
 
 
 def analyze_wallets(token_address):
@@ -440,6 +401,55 @@ def analyze_wallets(token_address):
     return _build_wallet_stats(wallets) if wallets else None
 
 
+def _process_solana_token(mint):
+    try:
+        # STEP 1: 初取引を待つ（最大5分）
+        first_trade_time, _ = wait_for_first_trade(mint)
+        if not first_trade_time:
+            print(f"[Pump.fun] 初取引なし → スキップ: {mint[:20]}")
+            return
+
+        # STEP 2: 初取引から3分待機
+        wait_remaining = max(0, 180 - (time.time() - first_trade_time))
+        if wait_remaining > 0:
+            print(f"[Pump.fun] 3分フィルター待機中 ({wait_remaining:.0f}秒)... ※メインループは継続中")
+            time.sleep(wait_remaining)
+
+        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
+        wallet_data  = analyze_wallets(mint)
+        unique_count = wallet_data["unique_wallets"] if wallet_data else 0
+        print(f"[Pump.fun] 3分間ユニークアドレス: {unique_count}人")
+        if unique_count < 30:
+            print(f"[Pump.fun] フィルター不合格 ({unique_count} < 30人) → スキップ")
+            return
+
+        print(f"[Pump.fun] ✅ フィルター合格！通知送信中...")
+
+        # STEP 4: 通知
+        dex = analyze_dexscreener(mint)
+        wallet_text, wallet_judge = format_wallet_output(wallet_data)
+        dex_text = (
+            f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+            f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+            f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
+        ) if dex else "📊 価格データ取得中...\n"
+        msg = (
+            f"🚀 <b>[Pump.fun] 新規トークン検知！</b>\n\n"
+            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"Mint: <code>{mint}</code>\n"
+            f"👥 3分間ユニーク: <b>{unique_count}人</b>\n\n"
+            f"{dex_text}\n"
+            f"{wallet_text}\n"
+            f"{wallet_judge}\n\n"
+            f"📊 https://dexscreener.com/solana/{mint}\n"
+            f"🔗 https://pump.fun/{mint}"
+        )
+        send_telegram(msg)
+        print(f"[Pump.fun] 通知送信完了: {mint[:20]}")
+    except Exception as e:
+        print(f"[Pump.fun] スレッドエラー ({mint[:20]}): {e}")
+
+
 def check_pumpfun_onchain():
     global known_token_mints
     txns = get_new_pumpfun_transactions()
@@ -454,51 +464,13 @@ def check_pumpfun_onchain():
         if not mint or mint in known_token_mints:
             continue
         known_token_mints.add(mint)
-        print(f"[Pump.fun] 新規mint: {mint[:20]} 監視開始...")
-
-        # STEP 1: 初取引待機
-        first_trade_time, _ = wait_for_first_trade(mint)
-        if not first_trade_time:
-            print(f"[Pump.fun] 初取引なし → スキップ")
-            continue
-
-        # STEP 2: 3分待機
-        wait_remaining = max(0, 180 - (time.time() - first_trade_time))
-        if wait_remaining > 0:
-            print(f"[Pump.fun] 3分フィルター待機中 ({wait_remaining:.0f}秒)...")
-            time.sleep(wait_remaining)
-
-        # STEP 3: 70件フィルター
-        trade_count = solana_count_trades(mint, first_trade_time)
-        print(f"[Pump.fun] 3分間取引数: {trade_count}件")
-        if trade_count < 70:
-            print(f"[Pump.fun] フィルター不合格 ({trade_count} < 70件) → スキップ")
-            continue
-
-        print(f"[Pump.fun] ✅ フィルター合格！分析中...")
-
-        # STEP 4: 通知
-        dex         = analyze_dexscreener(mint)
-        wallet_data = analyze_wallets(mint)
-        wallet_text, wallet_judge = format_wallet_output(wallet_data)
-        dex_text = (
-            f"💧 流動性: ${dex['liquidity']:,.0f}\n"
-            f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-            f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
-        ) if dex else "📊 価格データ取得中...\n"
-        msg = (
-            f"🚀 <b>[Pump.fun] 新規トークン検知！</b>\n\n"
-            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"Mint: <code>{mint}</code>\n"
-            f"🔥 3分間取引数: <b>{trade_count}件</b>\n\n"
-            f"{dex_text}\n"
-            f"{wallet_text}\n"
-            f"{wallet_judge}\n\n"
-            f"📊 https://dexscreener.com/solana/{mint}\n"
-            f"🔗 https://pump.fun/{mint}"
+        print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
+        t = threading.Thread(
+            target=_process_solana_token,
+            args=(mint,),
+            daemon=True,
         )
-        send_telegram(msg)
-        print(f"[Pump.fun] 通知送信完了: {mint[:20]}")
+        t.start()
 
 
 def get_cex_symbols():
@@ -548,7 +520,8 @@ def main():
         "🟡 DEX: FourMeme / BSC\n"
         "🔵 DEX: Clanker / Base\n\n"
         "🔍 フィルター条件：\n"
-        "・初取引検知後、3分間の取引数が70件以上のみ通知\n"
+        "・初取引後3分間のユニークアドレス30人以上のみ通知\n"
+        "・並列処理で待機中も他チェーンを継続監視\n"
         "・ウォレット多様性（自作自演チェック）付き"
     )
 
@@ -571,10 +544,12 @@ def main():
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
+            active_threads = threading.active_count() - 1
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
-                f"Solana={len(known_token_mints)} {evm_status}"
+                f"Solana={len(known_token_mints)} {evm_status} "
+                f"監視スレッド={active_threads}"
             )
 
 
