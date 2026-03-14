@@ -15,7 +15,9 @@ BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
 # Pump.fun API: 530エラー対策として複数URLを順番に試す
 PUMPFUN_API_URLS = [
     "https://frontend-api.pump.fun/coins",
+    "https://frontend-api-v2.pump.fun/coins",
     "https://client-api-2-74b1891ee9f9.herokuapp.com/coins",
+    "https://pumpapi.fun/api/coins",
 ]
 SOLANA_RPC = (
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
@@ -32,10 +34,10 @@ PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
-        # Binance公式RPC（最安定）→ publicnode フォールバック
+        # eth_getLogs対応のRPCのみ使用（dataseedはgetLogs非対応）
         "rpc_list": [
-            "https://bsc-dataseed1.binance.org",
-            "https://bsc-dataseed2.binance.org",
+            "https://bsc-mainnet.public.blastapi.io",
+            "https://1rpc.io/bnb",
             "https://bsc-rpc.publicnode.com",
         ],
         "contract": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
