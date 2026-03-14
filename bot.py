@@ -265,10 +265,6 @@ def evm_analyze_wallets(token_address, chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_token(token_address, chain):
-    """
-    新規EVMトークンの待機・フィルター・通知を別スレッドで実行。
-    このスレッドが動いている間もメインループは他のチェーン/トークンを検知し続ける。
-    """
     try:
         # STEP 1: 初取引を待つ（最大5分）
         first_block, first_time = evm_wait_for_first_trade(token_address, chain)
@@ -324,17 +320,12 @@ def _process_evm_token(token_address, chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
-    """
-    新規トークンを検知したらすぐ別スレッドへ渡してリターン。
-    待機処理は一切ここではやらない。
-    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
 
-        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
@@ -371,7 +362,6 @@ def check_evm_chain(chain):
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
 
-            # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain),
@@ -451,11 +441,11 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
+            oldest     = sigs[-1]
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
+        time.sleep(10)
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
 
@@ -469,7 +459,7 @@ def solana_count_trades(token_address, first_trade_time):
         return 0
     cutoff = first_trade_time + 180
     count  = 0
-    for sig_info in sigs:  # 降順（新→旧）
+    for sig_info in sigs:
         bt = sig_info.get("blockTime", 0)
         if not bt:
             continue
@@ -488,7 +478,7 @@ def analyze_wallets(token_address):
     if not sigs_result:
         return None
     wallets = []
-    for sig_info in sigs_result[:20]:  # 30→20TX（コスト削減）
+    for sig_info in sigs_result[:40]:  # ★修正: 20→40TX（フィルター20に対応）
         sig = sig_info.get("signature", "")
         if not sig:
             continue
@@ -509,10 +499,6 @@ def analyze_wallets(token_address):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_solana_token(mint):
-    """
-    新規Solanaトークンの待機・フィルター・通知を別スレッドで実行。
-    このスレッドが動いている間もメインループは他のトークンを検知し続ける。
-    """
     try:
         # STEP 1: 初取引を待つ（最大5分）
         first_trade_time, _ = wait_for_first_trade(mint)
@@ -527,12 +513,13 @@ def _process_solana_token(mint):
                   f" ※メインループは継続中")
             time.sleep(wait_remaining)
 
-        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
+        # STEP 3: ユニークアドレス20件フィルター（ウォレット分析と兼用）
+        # ※Solanaは40TXを分析するため閾値を20に設定（EVMの30とは別管理）
         wallet_data  = analyze_wallets(mint)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
         print(f"[Pump.fun] 3分間ユニークアドレス: {unique_count}人")
-        if unique_count < 30:
-            print(f"[Pump.fun] フィルター不合格 ({unique_count} < 30人) → スキップ")
+        if unique_count < 20:  # ★修正: 30→20（40TXから最低20ユニークで判定）
+            print(f"[Pump.fun] フィルター不合格 ({unique_count} < 20人) → スキップ")
             return
 
         print(f"[Pump.fun] ✅ フィルター合格！通知送信中...")
@@ -568,10 +555,6 @@ def _process_solana_token(mint):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_pumpfun_onchain():
-    """
-    新規mintを検知したらすぐ別スレッドへ渡してリターン。
-    待機処理は一切ここではやらない。
-    """
     global known_token_mints
     txns = get_new_pumpfun_transactions()
     if not txns:
@@ -580,7 +563,7 @@ def check_pumpfun_onchain():
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
             continue
-        time.sleep(0.2)  # Heliusレート制限対策
+        time.sleep(0.2)
         mint = parse_new_token(sig)
         if not mint or mint in known_token_mints:
             continue
@@ -588,7 +571,6 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
 
-        # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
         t = threading.Thread(
             target=_process_solana_token,
             args=(mint,),
@@ -652,12 +634,12 @@ def main():
         "🟡 DEX: FourMeme / BSC\n"
         "🔵 DEX: Clanker / Base\n\n"
         "🔍 フィルター条件：\n"
-        "・初取引後3分間の取引数が70件以上のみ通知\n"
+        "・初取引後3分間のユニーク取引アドレス数で判定\n"
+        "・Solana: 20人以上 / EVM: 30人以上\n"
         "・並列処理で待機中も他チェーンを継続監視\n"
         "・ウォレット多様性（自作自演チェック）付き"
     )
 
-    # Solana初期化: 起動時点の最新sigを記録し、過去mintを無視
     print("[Pump.fun] 初期化中...")
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
@@ -667,19 +649,18 @@ def main():
 
     loop = 0
     while True:
-        # ── メインループは「検知だけ」、待機は各スレッドが担当 ──
         check_cex_listings()
         check_pumpfun_onchain()
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
-        time.sleep(30)  # 20→30秒（コスト削減）
+        time.sleep(30)
         loop += 1
         if loop % 30 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            active_threads = threading.active_count() - 1  # メインスレッド除く
+            active_threads = threading.active_count() - 1
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
