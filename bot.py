@@ -36,7 +36,7 @@ EVM_CHAINS = [
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        "rpc": "https://mainnet.base.org",
+        "rpc": "https://base.llamarpc.com",
         "contract": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
         "dex_url": "https://dexscreener.com/base/{}",
         "launch_url": "https://www.clanker.world",
@@ -44,7 +44,10 @@ EVM_CHAINS = [
     },
 ]
 
-HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
 
 # ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols       = set()
@@ -587,9 +590,11 @@ def check_pumpfun_api():
             "includeNsfw": "true",
         }, headers=HEADERS, timeout=10)
         if r.status_code != 200:
+            print(f"[Pump.fun API] HTTPエラー: {r.status_code} → {r.text[:100]}")
             return
         coins = r.json()
         if not isinstance(coins, list):
+            print(f"[Pump.fun API] 予期しないレスポンス: {str(coins)[:100]}")
             return
 
         for coin in coins:
@@ -597,12 +602,10 @@ def check_pumpfun_api():
             if not mint or mint in known_pumpfun_api_mints:
                 continue
 
-            # 卒業済み（Raydium移行済み）はスキップ
             if coin.get("complete", False):
                 known_pumpfun_api_mints.add(mint)
                 continue
 
-            # フィルター: 取引アドレス50人以上
             holders = coin.get("holder_count", 0) or 0
             if holders < 50:
                 continue
@@ -703,27 +706,32 @@ def main():
         last_signature = init_sigs[0].get("signature", "")
         print(f"[Pump.fun] 初期化完了 sig={last_signature[:20]}")
 
-    # pump.fun API初期化: 起動時点の既存トークンを無視
     print("[Pump.fun API] 初期化中...")
     try:
         r = requests.get(PUMPFUN_API_URL, params={
             "offset": 0, "limit": 20,
             "sort": "created_timestamp", "order": "DESC", "includeNsfw": "true",
         }, headers=HEADERS, timeout=10)
-        if r.status_code == 200 and isinstance(r.json(), list):
-            for coin in r.json():
-                mint = coin.get("mint", "")
-                if mint:
-                    known_pumpfun_api_mints.add(mint)
-            print(f"[Pump.fun API] 初期化完了: {len(known_pumpfun_api_mints)}件スキップ")
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                for coin in data:
+                    mint = coin.get("mint", "")
+                    if mint:
+                        known_pumpfun_api_mints.add(mint)
+                print(f"[Pump.fun API] 初期化完了: {len(known_pumpfun_api_mints)}件スキップ")
+            else:
+                print(f"[Pump.fun API] 初期化: 予期しないレスポンス形式 → {str(data)[:100]}")
+        else:
+            print(f"[Pump.fun API] 初期化HTTPエラー: {r.status_code} → {r.text[:100]}")
     except Exception as e:
         print(f"[Pump.fun API] 初期化エラー: {e}")
 
     loop = 0
     while True:
         check_cex_listings()
-        check_pumpfun_api()       # ボンディングカーブ早期検知
-        check_pumpfun_onchain()   # オンチェーン新規mint検知
+        check_pumpfun_api()
+        check_pumpfun_onchain()
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
