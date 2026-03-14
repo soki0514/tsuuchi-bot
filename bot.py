@@ -473,12 +473,12 @@ def solana_count_trades(token_address, first_trade_time):
 
 def analyze_wallets(token_address):
     sigs_result = solana_rpc("getSignaturesForAddress", [
-        token_address, {"limit": 50},
+        token_address, {"limit": 100},
     ])
     if not sigs_result:
         return None
     wallets = []
-    for sig_info in sigs_result[:40]:  # ★修正: 20→40TX（フィルター20に対応）
+    for sig_info in sigs_result[:70]:  # 70TX分析
         sig = sig_info.get("signature", "")
         if not sig:
             continue
@@ -513,13 +513,13 @@ def _process_solana_token(mint):
                   f" ※メインループは継続中")
             time.sleep(wait_remaining)
 
-        # STEP 3: ユニークアドレス20件フィルター（ウォレット分析と兼用）
-        # ※Solanaは40TXを分析するため閾値を20に設定（EVMの30とは別管理）
+        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
+        # ※Solanaは70TXを分析・EVMと同じ30ユニーク基準に統一
         wallet_data  = analyze_wallets(mint)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
         print(f"[Pump.fun] 3分間ユニークアドレス: {unique_count}人")
-        if unique_count < 20:  # ★修正: 30→20（40TXから最低20ユニークで判定）
-            print(f"[Pump.fun] フィルター不合格 ({unique_count} < 20人) → スキップ")
+        if unique_count < 30:
+            print(f"[Pump.fun] フィルター不合格 ({unique_count} < 30人) → スキップ")
             return
 
         print(f"[Pump.fun] ✅ フィルター合格！通知送信中...")
@@ -635,7 +635,7 @@ def main():
         "🔵 DEX: Clanker / Base\n\n"
         "🔍 フィルター条件：\n"
         "・初取引後3分間のユニーク取引アドレス数で判定\n"
-        "・Solana: 20人以上 / EVM: 30人以上\n"
+        "・Solana / EVM: 30ユニーク以上\n"
         "・並列処理で待機中も他チェーンを継続監視\n"
         "・ウォレット多様性（自作自演チェック）付き"
     )
