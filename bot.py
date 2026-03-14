@@ -192,6 +192,7 @@ def evm_rpc(chain, method, params):
                     data = r.json()
                     if "error" in data:
                         err = data["error"]
+                        # "no response"などは次のRPCへ
                         print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
                         break  # このRPCを諦め次のURLへ
                     return data.get("result")
@@ -361,6 +362,7 @@ def check_evm_chain(chain):
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
 
+        # FIX: from_block = last_block+1（-20キャップ削除でブロック漏れ防止）
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
@@ -392,6 +394,7 @@ def check_evm_chain(chain):
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
 
+            # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain),
@@ -438,6 +441,15 @@ def get_new_pumpfun_transactions():
 
 
 def parse_new_token(signature):
+    # Solanaシステムアドレスは新規トークンとして扱わない
+    IGNORED_MINTS = {
+        "So11111111111111111111111111111111111111112",  # Wrapped SOL (wSOL)
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  # mSOL
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", # stSOL
+    }
+
     result = None
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
@@ -456,7 +468,7 @@ def parse_new_token(signature):
     pre_mints = {b.get("mint") for b in pre_balances}
     for balance in post_balances:
         mint = balance.get("mint", "")
-        if mint and mint not in pre_mints:
+        if mint and mint not in pre_mints and mint not in IGNORED_MINTS:
             print(f"[新規mint発見] {mint[:20]}")
             return mint
     return None
@@ -471,13 +483,34 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]
+            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)
+        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
+
+
+def solana_count_trades(token_address, first_trade_time):
+    """初取引から3分間のトランザクション数をカウント"""
+    sigs = solana_rpc("getSignaturesForAddress", [
+        token_address, {"limit": 200, "commitment": "confirmed"},
+    ])
+    if not sigs:
+        return 0
+    cutoff = first_trade_time + 180
+    count  = 0
+    for sig_info in sigs:  # 降順（新→旧）
+        bt = sig_info.get("blockTime", 0)
+        if not bt:
+            continue
+        if bt > cutoff:
+            continue       # ウィンドウより新しい → スキップ
+        if bt < first_trade_time:
+            break          # ウィンドウより古い → 終了
+        count += 1
+    return count
 
 
 def analyze_wallets(token_address):
@@ -614,6 +647,7 @@ def check_pumpfun_onchain():
         known_token_mints.add(mint)
         print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
 
+        # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
         t = threading.Thread(
             target=_process_solana_token,
             args=(mint,),
@@ -699,13 +733,14 @@ def main():
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
-        time.sleep(30)
+        time.sleep(30)  # 20→30秒（コスト削減）
         loop += 1
         if loop % 30 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            active_threads = threading.active_count() - 1
+            # 稼働中のスレッド数も表示
+            active_threads = threading.active_count() - 1  # メインスレッド除く
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
