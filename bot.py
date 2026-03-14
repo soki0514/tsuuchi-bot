@@ -35,7 +35,7 @@ EVM_CHAINS = [
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        "rpc": "https://base-rpc.publicnode.com",
+        "rpc": "https://mainnet.base.org",
         "contract": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
         "dex_url": "https://dexscreener.com/base/{}",
         "launch_url": "https://www.clanker.world",
