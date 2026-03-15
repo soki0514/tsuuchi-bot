@@ -23,6 +23,11 @@ TRANSFER_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df52
 ZERO_TOPIC      = "0x0000000000000000000000000000000000000000000000000000000000000000"
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
+# ── Solana全般監視: SPL Token Metadata Program (全launchpad対応) ───────────────
+# pump.fun / rapidlaunch.io / moonshot など、Solanaの全launchpadはこのプログラムに
+# トークンのメタデータ(名前・シンボル)を登録するため、ここを見れば全て拾える
+SPL_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+
 # ── 監視チェーン ──────────────────────────────────────────────────────────────
 EVM_CHAINS = [
     {
@@ -58,20 +63,17 @@ HEADERS = {
 
 # ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
-known_token_mints = set()
-last_signature    = None
+known_token_mints = set()   # pump.fun + Solana全般共通（重複通知防止）
+last_signature    = None    # pump.fun 用
+all_solana_last_signature = None  # Solana全般（Metadata Program）用
 
-# ── レート制限対策: analyze_walletsの同時実行を2スレッドに制限 ────────────────
-# 1スレッド = 30回 × 1/0.4s = 2.5 RPS
-# 2スレッド同時 = 5 RPS → Helius無料枠(10 RPS)以内
+# ── レート制限対策 ────────────────────────────────────────────────────────────
 WALLET_SEMAPHORE = threading.Semaphore(2)
 
-# ── 検知漏れ防止: getTransaction失敗シグネチャのリトライキュー ──────────────
-# parse_new_tokenでgetTransactionが全試行失敗した場合にここへ保存し、
-# 次のメインループで再試行する（5分以内に成功しなければ破棄）
-RETRY_SIG_QUEUE = []               # [(signature, enqueued_time), ...]
+# ── リトライキュー ────────────────────────────────────────────────────────────
+RETRY_SIG_QUEUE = []
 RETRY_SIG_LOCK  = threading.Lock()
-RETRY_EXPIRY    = 300              # 秒: 5分
+RETRY_EXPIRY    = 300
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -175,6 +177,7 @@ def analyze_dexscreener(token_address):
             "buys_5m":         (pair.get("txns") or {}).get("m5", {}).get("buys", 0) or 0,
             "sells_5m":        (pair.get("txns") or {}).get("m5", {}).get("sells", 0) or 0,
             "price_change_5m": (pair.get("priceChange") or {}).get("m5", 0) or 0,
+            "dex_id":          pair.get("dexId", ""),
         }
     except Exception as e:
         print(f"DexScreenerエラー: {e}")
@@ -186,13 +189,9 @@ def analyze_dexscreener(token_address):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def evm_rpc(chain, method, params):
-    """
-    rpc_list内のRPCを順番に試す。全て失敗した場合はNoneを返す。
-    503/no responseなどでフェイルしたRPCはスキップし次のURLへ。
-    """
     rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
     for rpc_url in rpc_list:
-        for attempt in range(2):  # 各RPCは2回まで試す
+        for attempt in range(2):
             try:
                 r = requests.post(rpc_url, json={
                     "jsonrpc": "2.0", "id": 1,
@@ -201,8 +200,7 @@ def evm_rpc(chain, method, params):
                 if r.status_code == 200:
                     data = r.json()
                     if "error" in data:
-                        err = data["error"]
-                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
+                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {data['error']}")
                         break
                     return data.get("result")
                 print(f"[{chain['name']}] HTTP {r.status_code} ({rpc_url.split('/')[2]}) → 次のRPCへ")
@@ -215,9 +213,8 @@ def evm_rpc(chain, method, params):
 
 
 def evm_wait_for_first_trade(token_address, chain, timeout=300):
-    """初Transferイベントを待つ。成功: (block, time) / タイムアウト: (None, None)"""
     print(f"[{chain['name']}] 初取引待機中: {token_address[:16]}...")
-    deadline  = time.time() + timeout
+    deadline   = time.time() + timeout
     latest_hex = evm_rpc(chain, "eth_blockNumber", [])
     scan_from  = int(latest_hex, 16) - 5 if latest_hex else 0
 
@@ -242,25 +239,6 @@ def evm_wait_for_first_trade(token_address, chain, timeout=300):
 
     print(f"[{chain['name']}] 初取引タイムアウト: {token_address[:16]}")
     return None, None
-
-
-def evm_count_trades(token_address, from_block, chain):
-    """from_block〜最新ブロックのTransferイベント数を返す"""
-    try:
-        latest_hex = evm_rpc(chain, "eth_blockNumber", [])
-        if not latest_hex:
-            return 0
-        to_block = int(latest_hex, 16)
-        logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(to_block),
-            "address":   token_address,
-            "topics":    [TRANSFER_TOPIC],
-        }])
-        return len(logs) if logs else 0
-    except Exception as e:
-        print(f"[{chain['name']}] トレード数カウントエラー: {e}")
-        return 0
 
 
 def evm_analyze_wallets(token_address, chain):
@@ -296,25 +274,17 @@ def evm_analyze_wallets(token_address, chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_token(token_address, chain):
-    """
-    新規EVMトークンの待機・フィルター・通知を別スレッドで実行。
-    このスレッドが動いている間もメインループは他のチェーン/トークンを検知し続ける。
-    """
     try:
-        # STEP 1: 初取引を待つ（最大5分）
         first_block, first_time = evm_wait_for_first_trade(token_address, chain)
         if not first_block:
             print(f"[{chain['name']}] 初取引なし → スキップ: {token_address[:16]}")
             return
 
-        # STEP 2: 初取引から3分待機
         wait_remaining = max(0, 180 - (time.time() - first_time))
         if wait_remaining > 0:
-            print(f"[{chain['name']}] 3分フィルター待機中 ({wait_remaining:.0f}秒)..."
-                  f" ※メインループは継続中")
+            print(f"[{chain['name']}] 3分フィルター待機中 ({wait_remaining:.0f}秒)...")
             time.sleep(wait_remaining)
 
-        # STEP 3: ユニークアドレス30件フィルター（ウォレット分析と兼用）
         wallet_data  = evm_analyze_wallets(token_address, chain)
         unique_count = wallet_data["unique_wallets"] if wallet_data else 0
         print(f"[{chain['name']}] 3分間ユニークアドレス: {unique_count}人")
@@ -323,8 +293,6 @@ def _process_evm_token(token_address, chain):
             return
 
         print(f"[{chain['name']}] ✅ フィルター合格！通知送信中...")
-
-        # STEP 4: 通知
         dex = analyze_dexscreener(token_address)
         wallet_text, wallet_judge = format_wallet_output(wallet_data)
         dex_text = (
@@ -351,21 +319,16 @@ def _process_evm_token(token_address, chain):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EVM チェーン監視（メインループから呼ばれる・即リターン）
+# EVM チェーン監視
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
-    """
-    新規トークンを検知したらすぐ別スレッドへ渡してリターン。
-    待機処理は一切ここではやらない。
-    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
 
-        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
@@ -390,7 +353,6 @@ def check_evm_chain(chain):
             return
 
         print(f"[{chain['name']}] {len(logs)}件のイベント検知")
-
         for log in logs:
             topics = log.get("topics", [])
             if len(topics) < 3:
@@ -398,10 +360,8 @@ def check_evm_chain(chain):
             token_address = ("0x" + topics[2][-40:]).lower()
             if token_address in chain["known_tokens"]:
                 continue
-
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
-
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain),
@@ -427,7 +387,7 @@ def solana_rpc(method, params):
             if r.status_code == 200:
                 return r.json().get("result")
             if r.status_code == 429:
-                wait = 2 ** attempt  # 1秒 → 2秒 → 4秒 → 8秒
+                wait = 2 ** attempt
                 print(f"[Solana RPC] 429 レート制限 → {wait}秒待機 (attempt {attempt+1}/4)")
                 time.sleep(wait)
                 continue
@@ -440,23 +400,17 @@ def solana_rpc(method, params):
 
 
 def get_new_pumpfun_transactions():
-    """
-    last_signature以降の全新規TXをページネーションで取得。
-    - 通常時（last_signatureあり）: until指定で新規TXを全件取得
-    - 初回/初期化失敗時（last_signatureなし）: 最新50件のみ取得（遡り暴走防止）
-    - ページネーション上限200件で打ち切り（APIコール過多防止）
-    """
     global last_signature
-    all_txns  = []
-    before    = None
-    is_catchup = (last_signature is None)  # 初回または初期化失敗フラグ
+    all_txns   = []
+    before     = None
+    is_catchup = (last_signature is None)
 
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature  # これ以降（新しい側）を取得
+            opts["until"] = last_signature
         if before:
-            opts["before"] = before         # ページネーション用
+            opts["before"] = before
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
@@ -465,21 +419,18 @@ def get_new_pumpfun_transactions():
         all_txns.extend(result)
 
         if len(result) < 50:
-            break  # 50件未満 = 全件取得完了
+            break
 
-        # 初回/初期化失敗時は最新50件だけで打ち切り（5000件遡り暴走防止）
         if is_catchup:
             print(f"[Pump.fun] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
 
-        # ページネーション上限: 200件で打ち切り（84回APIコール防止）
         if len(all_txns) >= 200:
             print(f"[Pump.fun] ページネーション上限200件 → 打ち切り")
             break
 
-        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
-        time.sleep(0.1)  # ページネーション間のウェイト
+        time.sleep(0.1)
 
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
@@ -490,15 +441,13 @@ def get_new_pumpfun_transactions():
 
 
 def parse_new_token(signature):
-    # Solanaシステムアドレスは新規トークンとして扱わない
     IGNORED_MINTS = {
-        "So11111111111111111111111111111111111111112",  # Wrapped SOL (wSOL)
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
-        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  # mSOL
-        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", # stSOL
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
     }
-
     result = None
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
@@ -511,8 +460,6 @@ def parse_new_token(signature):
         print(f"[Solana] getTransaction返答なし (attempt {attempt+1}/3): {signature[:20]}")
         time.sleep(0.5)
     if not result:
-        # False = getTransaction完全失敗（リトライ対象）
-        # None  = TX取得成功だが新規mintなし（リトライ不要）
         return False
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
     pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
@@ -525,8 +472,45 @@ def parse_new_token(signature):
     return None
 
 
+def parse_new_fungible_mint(signature):
+    """任意TXから新規ファンジブルmintを抽出。NFT(decimals=0)は除外。"""
+    IGNORED_MINTS = {
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
+    }
+    result = None
+    for attempt in range(3):
+        result = solana_rpc("getTransaction", [
+            signature,
+            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
+             "commitment": "confirmed"},
+        ])
+        if result:
+            break
+        time.sleep(0.5)
+    if not result:
+        return False
+
+    post_balances = result.get("meta", {}).get("postTokenBalances", [])
+    pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
+    pre_mints = {b.get("mint") for b in pre_balances}
+
+    for balance in post_balances:
+        mint     = balance.get("mint", "")
+        decimals = balance.get("uiTokenAmount", {}).get("decimals", 0)
+        if not mint or mint in pre_mints or mint in IGNORED_MINTS:
+            continue
+        if decimals == 0:
+            continue  # NFTをスキップ
+        print(f"[Solana全般] 新規ファンジブルmint: {mint[:20]} (decimals={decimals})")
+        return mint
+    return None
+
+
 def wait_for_first_trade(token_address, timeout=300):
-    """初取引を待つ。成功: (first_trade_time, count) / タイムアウト: (None, 0)"""
     print(f"[Pump.fun] 初取引待機中: {token_address[:20]}...")
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -534,38 +518,16 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
+            oldest     = sigs[-1]
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
+        time.sleep(10)
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
 
 
-def solana_count_trades(token_address, first_trade_time):
-    """初取引から3分間のトランザクション数をカウント"""
-    sigs = solana_rpc("getSignaturesForAddress", [
-        token_address, {"limit": 200, "commitment": "confirmed"},
-    ])
-    if not sigs:
-        return 0
-    cutoff = first_trade_time + 180
-    count  = 0
-    for sig_info in sigs:  # 降順（新→旧）
-        bt = sig_info.get("blockTime", 0)
-        if not bt:
-            continue
-        if bt > cutoff:
-            continue       # ウィンドウより新しい → スキップ
-        if bt < first_trade_time:
-            break          # ウィンドウより古い → 終了
-        count += 1
-    return count
-
-
 def analyze_wallets(token_address):
-    # セマフォで同時実行を最大2スレッドに制限（429対策）
     with WALLET_SEMAPHORE:
         sigs_result = solana_rpc("getSignaturesForAddress", [
             token_address, {"limit": 100},
@@ -573,11 +535,11 @@ def analyze_wallets(token_address):
         if not sigs_result:
             return None
         wallets = []
-        for sig_info in sigs_result[:30]:  # 70→30に削減（429対策）
+        for sig_info in sigs_result[:30]:
             sig = sig_info.get("signature", "")
             if not sig:
                 continue
-            time.sleep(0.4)  # 0.2→0.4秒（429対策）
+            time.sleep(0.4)
             tx = solana_rpc("getTransaction", [
                 sig, {"encoding": "json", "maxSupportedTransactionVersion": 0},
             ])
@@ -590,23 +552,16 @@ def analyze_wallets(token_address):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Solana トークン処理スレッド
+# Solana (pump.fun) トークン処理スレッド
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_solana_token(mint):
-    """
-    新規Solanaトークンの2段階通知。
-    STEP A (60秒後): ユニーク30人以上 → 🟣 早期通知
-    STEP B (180秒後): ユニーク20人以上 → 🚀 確定通知（ウォレット分析付き）
-    """
     try:
-        # STEP 1: 初取引を待つ（最大5分）
         first_trade_time, _ = wait_for_first_trade(mint)
         if not first_trade_time:
             print(f"[Pump.fun] 初取引なし → スキップ: {mint[:20]}")
             return
 
-        # ── STEP A: 初取引から60秒後 → 早期チェック ──────────────────────────
         wait_early = max(0, 60 - (time.time() - first_trade_time))
         if wait_early > 0:
             time.sleep(wait_early)
@@ -636,7 +591,6 @@ def _process_solana_token(mint):
             send_telegram(msg)
             print(f"[Pump.fun] 🟣 早期通知送信完了: {mint[:20]}")
 
-        # ── STEP B: 初取引から180秒後 → 確定チェック ─────────────────────────
         wait_final = max(0, 180 - (time.time() - first_trade_time))
         if wait_final > 0:
             print(f"[Pump.fun] 確定チェック待機中 ({wait_final:.0f}秒)...")
@@ -650,7 +604,6 @@ def _process_solana_token(mint):
             return
 
         print(f"[Pump.fun] ✅ フィルター合格！🚀通知送信中...")
-
         dex = analyze_dexscreener(mint)
         wallet_text, wallet_judge = format_wallet_output(wallet_data)
         dex_text = (
@@ -678,73 +631,53 @@ def _process_solana_token(mint):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun 監視（メインループから呼ばれる・即リターン）
+# Pump.fun 監視
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_pumpfun_onchain():
-    """
-    新規mintを検知したらすぐ別スレッドへ渡してリターン。
-    待機処理は一切ここではやらない。
-    """
     global known_token_mints
     txns = get_new_pumpfun_transactions()
     if not txns:
         return
 
-    # ── 古いTX除外（5分超はボンカーブ通知ウィンドウ外）────────────────────────
     now = time.time()
     before_filter = len(txns)
     txns = [tx for tx in txns
             if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
     if len(txns) < before_filter:
-        print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ"
-              f"（残り{len(txns)}件）")
+        print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ（残り{len(txns)}件）")
 
-    # ── 1ループ最大100件制限（詰まり防止: 100件×0.5s=50秒以内）──────────────
     MAX_TX_PER_LOOP = 100
     if len(txns) > MAX_TX_PER_LOOP:
         print(f"[Pump.fun] ⚠️ TX上限制限: {len(txns)}件 → 最新{MAX_TX_PER_LOOP}件のみ処理")
-        txns = txns[:MAX_TX_PER_LOOP]  # 降順なので先頭=最新
+        txns = txns[:MAX_TX_PER_LOOP]
 
     for tx_info in txns:
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
             continue
-        time.sleep(0.5)  # Heliusレート制限対策（0.3→0.5秒、429削減）
+        time.sleep(0.5)
         mint = parse_new_token(sig)
         if mint is False:
-            # getTransaction完全失敗 → リトライキューへ保存（検知漏れ防止）
             with RETRY_SIG_LOCK:
                 RETRY_SIG_QUEUE.append((sig, time.time()))
             print(f"[Pump.fun] リトライ予約: {sig[:20]}")
             continue
         if not mint or mint in known_token_mints:
             continue
-
         known_token_mints.add(mint)
         print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
-
-        t = threading.Thread(
-            target=_process_solana_token,
-            args=(mint,),
-            daemon=True,
-        )
+        t = threading.Thread(target=_process_solana_token, args=(mint,), daemon=True)
         t.start()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun リトライキュー処理（検知漏れ防止）
+# リトライキュー処理
 # ══════════════════════════════════════════════════════════════════════════════
 
 def process_retry_queue():
-    """
-    getTransactionが失敗したシグネチャを再試行。
-    成功すれば通常通りスレッドを起動する。
-    RETRY_EXPIRY秒以上経過したものは破棄。
-    """
     global known_token_mints
     now = time.time()
-
     with RETRY_SIG_LOCK:
         if not RETRY_SIG_QUEUE:
             return
@@ -760,30 +693,242 @@ def process_retry_queue():
     print(f"[Pump.fun] リトライ処理: {len(valid)}件")
     still_failed = []
     for sig, enqueued_at in valid:
-        time.sleep(1.0)  # リトライは長めに待つ（429対策）
+        time.sleep(1.0)
         mint = parse_new_token(sig)
-
         if mint is False:
             if time.time() - enqueued_at <= RETRY_EXPIRY:
                 still_failed.append((sig, enqueued_at))
             continue
-
         if not mint or mint in known_token_mints:
             continue
-
         known_token_mints.add(mint)
         print(f"[Pump.fun] ✅ リトライ成功！mint → スレッド起動: {mint[:20]}")
-        t = threading.Thread(
-            target=_process_solana_token,
-            args=(mint,),
-            daemon=True,
-        )
+        t = threading.Thread(target=_process_solana_token, args=(mint,), daemon=True)
         t.start()
 
     if still_failed:
         with RETRY_SIG_LOCK:
             RETRY_SIG_QUEUE.extend(still_failed)
         print(f"[Pump.fun] リトライ再キュー: {len(still_failed)}件")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana 全般監視 (Token Metadata Program) ── 独立バックグラウンドスレッド
+# pump.fun以外の全launchpad (rapidlaunch.io / moonshot / letsbonk 等) 対応
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_new_metadata_transactions():
+    global all_solana_last_signature
+    all_txns = []
+    before   = None
+    is_first = (all_solana_last_signature is None)
+
+    while True:
+        opts = {"limit": 50, "commitment": "confirmed"}
+        if all_solana_last_signature:
+            opts["until"] = all_solana_last_signature
+        if before:
+            opts["before"] = before
+
+        result = solana_rpc("getSignaturesForAddress", [SPL_METADATA_PROGRAM, opts])
+        if not result:
+            break
+
+        all_txns.extend(result)
+
+        if len(result) < 50:
+            break
+        if is_first:
+            print(f"[Solana全般] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
+            break
+        if len(all_txns) >= 100:
+            print("[Solana全般] ページネーション上限100件 → 打ち切り")
+            break
+
+        before = result[-1].get("signature")
+        time.sleep(0.1)
+
+    if all_txns:
+        all_solana_last_signature = all_txns[0].get("signature", "")
+        if len(all_txns) > 1:
+            print(f"[Solana全般] {len(all_txns)}件の新規TX検出")
+
+    return all_txns
+
+
+def _get_platform_name(dex):
+    if not dex:
+        return "Unknown"
+    dex_id = dex.get("dex_id", "").lower()
+    name_map = {
+        "raydium":     "Raydium",
+        "pump-fun":    "pump.fun",
+        "pumpfun":     "pump.fun",
+        "orca":        "Orca",
+        "meteora":     "Meteora",
+        "jupiter":     "Jupiter",
+        "rapidlaunch": "rapidlaunch.io",
+        "moonshot":    "Moonshot",
+        "letsbonk":    "LetsBonk",
+    }
+    for key, label in name_map.items():
+        if key in dex_id:
+            return label
+    return dex_id.capitalize() if dex_id else "Unknown"
+
+
+def _build_dex_text(dex):
+    if not dex:
+        return "📊 価格データ取得中...\n\n"
+    return (
+        f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+        f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+        f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n\n"
+    )
+
+
+def _process_solana_any_token(mint):
+    """全Solana launchpadトークンの監視スレッド。50人超で通知。"""
+    try:
+        print(f"[Solana全般] 初取引待機中: {mint[:20]}...")
+        deadline = time.time() + 300
+        first_trade_time = None
+        while time.time() < deadline:
+            sigs = solana_rpc("getSignaturesForAddress", [
+                mint, {"limit": 5, "commitment": "confirmed"},
+            ])
+            if sigs:
+                oldest = sigs[-1]
+                first_trade_time = float(oldest.get("blockTime") or time.time())
+                print(f"[Solana全般] 初取引検知: {mint[:20]}")
+                break
+            time.sleep(10)
+
+        if not first_trade_time:
+            print(f"[Solana全般] 初取引タイムアウト → スキップ: {mint[:20]}")
+            return
+
+        # ── 60秒チェック ──────────────────────────────────────────────────────
+        wait_secs = max(0, 60 - (time.time() - first_trade_time))
+        if wait_secs > 0:
+            time.sleep(wait_secs)
+
+        early_data   = analyze_wallets(mint)
+        early_unique = early_data["unique_wallets"] if early_data else 0
+        print(f"[Solana全般] 60秒チェック: {early_unique}人 ({mint[:16]})")
+
+        if early_unique >= 50:
+            dex      = analyze_dexscreener(mint)
+            platform = _get_platform_name(dex)
+            dex_text = _build_dex_text(dex)
+            msg = (
+                f"🟡 <b>[Solana/{platform}] 新規トークン早期検知！</b>\n\n"
+                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"📋 Mintアドレス（タップでコピー）\n"
+                f"<code>{mint}</code>\n\n"
+                f"👥 取引アドレス: <b>{early_unique}人</b>\n\n"
+                f"{dex_text}"
+                f"📊 https://dexscreener.com/solana/{mint}\n"
+                f"🔍 https://solscan.io/token/{mint}"
+            )
+            send_telegram(msg)
+            print(f"[Solana全般] 🟡 早期通知送信完了: {mint[:20]}")
+
+        # ── 180秒チェック ─────────────────────────────────────────────────────
+        wait_secs = max(0, 180 - (time.time() - first_trade_time))
+        if wait_secs > 0:
+            print(f"[Solana全般] 確定チェック待機中 ({wait_secs:.0f}秒)...")
+            time.sleep(wait_secs)
+
+        wallet_data  = analyze_wallets(mint)
+        unique_count = wallet_data["unique_wallets"] if wallet_data else 0
+        print(f"[Solana全般] 180秒チェック: {unique_count}人 ({mint[:16]})")
+
+        if unique_count < 50:
+            print(f"[Solana全般] フィルター不合格 ({unique_count} < 50人) → スキップ")
+            return
+
+        dex      = analyze_dexscreener(mint)
+        platform = _get_platform_name(dex)
+        dex_text = _build_dex_text(dex)
+        wallet_text, wallet_judge = format_wallet_output(wallet_data)
+        msg = (
+            f"🟢 <b>[Solana/{platform}] 新規トークン確定通知！</b>\n\n"
+            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"📋 Mintアドレス（タップでコピー）\n"
+            f"<code>{mint}</code>\n\n"
+            f"👥 3分間ユニーク: <b>{unique_count}人</b>\n\n"
+            f"{dex_text}"
+            f"{wallet_text}\n"
+            f"{wallet_judge}\n\n"
+            f"📊 https://dexscreener.com/solana/{mint}\n"
+            f"🔍 https://solscan.io/token/{mint}"
+        )
+        send_telegram(msg)
+        print(f"[Solana全般] 🟢 確定通知送信完了: {mint[:20]}")
+
+    except Exception as e:
+        print(f"[Solana全般] スレッドエラー ({mint[:20]}): {e}")
+
+
+def check_all_solana_onchain():
+    global known_token_mints
+    txns = get_new_metadata_transactions()
+    if not txns:
+        return
+
+    now = time.time()
+    before_filter = len(txns)
+    txns = [tx for tx in txns
+            if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
+    if len(txns) < before_filter:
+        print(f"[Solana全般] 古いTX除外: {before_filter - len(txns)}件スキップ（残り{len(txns)}件）")
+
+    MAX_TX_PER_LOOP = 50
+    if len(txns) > MAX_TX_PER_LOOP:
+        print(f"[Solana全般] TX上限制限: {len(txns)}件 → 最新{MAX_TX_PER_LOOP}件のみ処理")
+        txns = txns[:MAX_TX_PER_LOOP]
+
+    new_count = 0
+    for tx_info in txns:
+        sig = tx_info.get("signature", "")
+        if not sig or tx_info.get("err"):
+            continue
+        time.sleep(0.6)
+        mint = parse_new_fungible_mint(sig)
+        if mint is False or not mint:
+            continue
+        if mint in known_token_mints:
+            continue
+        known_token_mints.add(mint)
+        new_count += 1
+        print(f"[Solana全般] 新規ファンジブルmint → スレッド起動: {mint[:20]}")
+        t = threading.Thread(target=_process_solana_any_token, args=(mint,), daemon=True)
+        t.start()
+
+    if new_count > 0:
+        print(f"[Solana全般] {new_count}件の新規トークンスレッド起動")
+
+
+def solana_all_monitor_loop():
+    """Solana全般監視の独立ループ（60秒ごと）"""
+    global all_solana_last_signature
+    print("[Solana全般] 監視ループ開始中...")
+
+    init_sigs = solana_rpc("getSignaturesForAddress",
+                           [SPL_METADATA_PROGRAM, {"limit": 5}])
+    if init_sigs:
+        all_solana_last_signature = init_sigs[0].get("signature", "")
+        print(f"[Solana全般] 初期化完了 sig={all_solana_last_signature[:20]}")
+    else:
+        print("[Solana全般] 初期化失敗（RPC応答なし）→ 次回から取得")
+
+    while True:
+        try:
+            check_all_solana_onchain()
+        except Exception as e:
+            print(f"[Solana全般] ループエラー: {e}")
+        time.sleep(60)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -839,15 +984,19 @@ def main():
         "🏦 CEX: Bitget取引所（新規上場）\n"
         "🟣 Pump.fun 早期検知（60秒・30人）\n"
         "🚀 Pump.fun 確定通知（3分・20人）\n"
+        "🟡 Solana全般 早期検知（60秒・50人）\n"
+        "🟢 Solana全般 確定通知（3分・50人）\n"
         "🟡 DEX: FourMeme / BSC\n"
         "🔵 DEX: Clanker / Base\n\n"
+        "🔍 Solana全般監視対象：\n"
+        "pump.fun / rapidlaunch.io / moonshot\n"
+        "letsbonk / その他全Solana launchpad\n\n"
         "🔍 フィルター条件：\n"
-        "・60秒後 ユニーク30人以上 → 🟣 即通知\n"
-        "・3分後 ユニーク20人以上 → 🚀 確定通知\n"
+        "・Pump.fun: 60秒後30人 / 3分後20人\n"
+        "・Solana全般: 60秒後50人 / 3分後50人\n"
         "・並列処理で待機中も他チェーンを継続監視"
     )
 
-    # Solana初期化: 起動時点の最新sigを記録し、過去mintを無視
     print("[Pump.fun] 初期化中...")
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
@@ -855,22 +1004,26 @@ def main():
         last_signature = init_sigs[0].get("signature", "")
         print(f"[Pump.fun] 初期化完了 sig={last_signature[:20]}")
 
+    # Solana全般監視を独立バックグラウンドスレッドで起動
+    t_all_solana = threading.Thread(target=solana_all_monitor_loop, daemon=True)
+    t_all_solana.start()
+    print("[Solana全般] バックグラウンドスレッド起動完了")
+
     loop = 0
     while True:
-        # ── メインループは「検知だけ」、待機は各スレッドが担当 ──
         check_cex_listings()
-        check_pumpfun_onchain()   # オンチェーン新規mint検知（2段階通知）
-        process_retry_queue()     # getTransaction失敗分の再試行（検知漏れ防止）
+        check_pumpfun_onchain()
+        process_retry_queue()
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
 
-        time.sleep(30)  # 20→30秒（コスト削減）
+        time.sleep(30)
         loop += 1
         if loop % 30 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            active_threads = threading.active_count() - 1  # メインスレッド除く
+            active_threads = threading.active_count() - 1
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
