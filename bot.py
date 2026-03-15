@@ -365,6 +365,7 @@ def check_evm_chain(chain):
             return
         latest_int = int(latest_hex, 16)
 
+        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
@@ -443,18 +444,19 @@ def get_new_pumpfun_transactions():
     last_signature以降の全新規TXをページネーションで取得。
     - 通常時（last_signatureあり）: until指定で新規TXを全件取得
     - 初回/初期化失敗時（last_signatureなし）: 最新50件のみ取得（遡り暴走防止）
+    - ページネーション上限200件で打ち切り（APIコール過多防止）
     """
     global last_signature
     all_txns  = []
     before    = None
-    is_catchup = (last_signature is None)
+    is_catchup = (last_signature is None)  # 初回または初期化失敗フラグ
 
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature
+            opts["until"] = last_signature  # これ以降（新しい側）を取得
         if before:
-            opts["before"] = before
+            opts["before"] = before         # ページネーション用
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
@@ -463,14 +465,21 @@ def get_new_pumpfun_transactions():
         all_txns.extend(result)
 
         if len(result) < 50:
-            break
+            break  # 50件未満 = 全件取得完了
 
+        # 初回/初期化失敗時は最新50件だけで打ち切り（5000件遡り暴走防止）
         if is_catchup:
             print(f"[Pump.fun] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
 
+        # ページネーション上限: 200件で打ち切り（84回APIコール防止）
+        if len(all_txns) >= 200:
+            print(f"[Pump.fun] ページネーション上限200件 → 打ち切り")
+            break
+
+        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
-        time.sleep(0.1)
+        time.sleep(0.1)  # ページネーション間のウェイト
 
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
@@ -483,11 +492,11 @@ def get_new_pumpfun_transactions():
 def parse_new_token(signature):
     # Solanaシステムアドレスは新規トークンとして扱わない
     IGNORED_MINTS = {
-        "So11111111111111111111111111111111111111112",
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
-        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
+        "So11111111111111111111111111111111111111112",  # Wrapped SOL (wSOL)
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  # mSOL
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", # stSOL
     }
 
     result = None
@@ -525,11 +534,11 @@ def wait_for_first_trade(token_address, timeout=300):
             token_address, {"limit": 5, "commitment": "confirmed"},
         ])
         if sigs:
-            oldest     = sigs[-1]
+            oldest     = sigs[-1]  # 降順なので[-1]が最古 = 初取引
             block_time = oldest.get("blockTime") or time.time()
             print(f"[Pump.fun] 初取引検知！ blockTime={block_time}")
             return float(block_time), len(sigs)
-        time.sleep(10)
+        time.sleep(10)  # 5→10秒（コスト削減、速度への影響±10秒）
     print(f"[Pump.fun] 初取引タイムアウト: {token_address[:20]}")
     return None, 0
 
@@ -543,14 +552,14 @@ def solana_count_trades(token_address, first_trade_time):
         return 0
     cutoff = first_trade_time + 180
     count  = 0
-    for sig_info in sigs:
+    for sig_info in sigs:  # 降順（新→旧）
         bt = sig_info.get("blockTime", 0)
         if not bt:
             continue
         if bt > cutoff:
-            continue
+            continue       # ウィンドウより新しい → スキップ
         if bt < first_trade_time:
-            break
+            break          # ウィンドウより古い → 終了
         count += 1
     return count
 
@@ -564,11 +573,11 @@ def analyze_wallets(token_address):
         if not sigs_result:
             return None
         wallets = []
-        for sig_info in sigs_result[:30]:
+        for sig_info in sigs_result[:30]:  # 70→30に削減（429対策）
             sig = sig_info.get("signature", "")
             if not sig:
                 continue
-            time.sleep(0.4)
+            time.sleep(0.4)  # 0.2→0.4秒（429対策）
             tx = solana_rpc("getTransaction", [
                 sig, {"encoding": "json", "maxSupportedTransactionVersion": 0},
             ])
@@ -681,6 +690,22 @@ def check_pumpfun_onchain():
     txns = get_new_pumpfun_transactions()
     if not txns:
         return
+
+    # ── 古いTX除外（5分超はボンカーブ通知ウィンドウ外）────────────────────────
+    now = time.time()
+    before_filter = len(txns)
+    txns = [tx for tx in txns
+            if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
+    if len(txns) < before_filter:
+        print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ"
+              f"（残り{len(txns)}件）")
+
+    # ── 1ループ最大100件制限（詰まり防止: 100件×0.5s=50秒以内）──────────────
+    MAX_TX_PER_LOOP = 100
+    if len(txns) > MAX_TX_PER_LOOP:
+        print(f"[Pump.fun] ⚠️ TX上限制限: {len(txns)}件 → 最新{MAX_TX_PER_LOOP}件のみ処理")
+        txns = txns[:MAX_TX_PER_LOOP]  # 降順なので先頭=最新
+
     for tx_info in txns:
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
@@ -845,7 +870,7 @@ def main():
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
-            active_threads = threading.active_count() - 1
+            active_threads = threading.active_count() - 1  # メインスレッド除く
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
