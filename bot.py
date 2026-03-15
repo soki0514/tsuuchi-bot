@@ -419,9 +419,9 @@ def get_new_pumpfun_transactions():
     while True:  # 上限なし - 全件取得するまでページネーション継続
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature  # これ以降（新しい側）を取得
+            opts["until"] = last_signature
         if before:
-            opts["before"] = before         # ページネーション用
+            opts["before"] = before
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
@@ -430,11 +430,10 @@ def get_new_pumpfun_transactions():
         all_txns.extend(result)
 
         if len(result) < 50:
-            break  # 50件未満 = 全件取得完了
+            break
 
-        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
-        time.sleep(0.1)  # ページネーション間のウェイト
+        time.sleep(0.1)
 
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
@@ -521,11 +520,11 @@ def analyze_wallets(token_address):
     if not sigs_result:
         return None
     wallets = []
-    for sig_info in sigs_result[:70]:
+    for sig_info in sigs_result[:30]:  # 70→30に削減（429対策）
         sig = sig_info.get("signature", "")
         if not sig:
             continue
-        time.sleep(0.2)
+        time.sleep(0.4)  # 0.2→0.4秒（429対策）
         tx = solana_rpc("getTransaction", [
             sig, {"encoding": "json", "maxSupportedTransactionVersion": 0},
         ])
