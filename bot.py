@@ -386,7 +386,7 @@ def check_evm_chain(chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def solana_rpc(method, params):
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             r = requests.post(SOLANA_RPC, json={
                 "jsonrpc": "2.0", "id": 1,
@@ -394,10 +394,16 @@ def solana_rpc(method, params):
             }, timeout=15)
             if r.status_code == 200:
                 return r.json().get("result")
+            if r.status_code == 429:
+                # レート制限: 指数バックオフで待機
+                wait = 2 ** attempt  # 1秒 → 2秒 → 4秒 → 8秒
+                print(f"[Solana RPC] 429 レート制限 → {wait}秒待機 (attempt {attempt+1}/4)")
+                time.sleep(wait)
+                continue
             print(f"[Solana RPC] HTTPエラー {r.status_code}: {r.text[:100]}")
         except Exception as e:
             print(f"[Solana RPC] 接続エラー ({method}): {e}")
-        if attempt < 2:
+        if attempt < 3:
             time.sleep(0.5)
     return None
 
@@ -633,7 +639,7 @@ def check_pumpfun_onchain():
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
             continue
-        time.sleep(0.1)
+        time.sleep(0.3)  # Heliusレート制限対策（1秒3リクエスト以内）
         mint = parse_new_token(sig)
         if not mint or mint in known_token_mints:
             continue
