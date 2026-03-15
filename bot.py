@@ -410,14 +410,14 @@ def get_new_pumpfun_transactions():
     global last_signature
     all_txns  = []
     before    = None
-    MAX_FETCH = 200  # 1サイクルあたり最大200件（過負荷防止）
+    MAX_FETCH = 200
 
     while len(all_txns) < MAX_FETCH:
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature  # これ以降（新しい側）を取得
+            opts["until"] = last_signature
         if before:
-            opts["before"] = before         # ページネーション用
+            opts["before"] = before
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
@@ -426,11 +426,10 @@ def get_new_pumpfun_transactions():
         all_txns.extend(result)
 
         if len(result) < 50:
-            break  # 50件未満 = 全件取得完了
+            break
 
-        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
-        time.sleep(0.1)  # ページネーション間のウェイト
+        time.sleep(0.1)
 
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
@@ -441,7 +440,6 @@ def get_new_pumpfun_transactions():
 
 
 def parse_new_token(signature):
-    # Solanaシステムアドレスは新規トークンとして扱わない
     IGNORED_MINTS = {
         "So11111111111111111111111111111111111111112",   # Wrapped SOL (wSOL)
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
@@ -518,7 +516,7 @@ def analyze_wallets(token_address):
     if not sigs_result:
         return None
     wallets = []
-    for sig_info in sigs_result[:70]:  # 70TX分析
+    for sig_info in sigs_result[:70]:
         sig = sig_info.get("signature", "")
         if not sig:
             continue
@@ -575,7 +573,8 @@ def _process_solana_token(mint):
                 f"{dex_text}\n"
                 f"⚡ ボンディングカーブ中（Raydium未移行）\n\n"
                 f"📊 https://dexscreener.com/solana/{mint}\n"
-                f"🔗 https://pump.fun/{mint}"
+                f"🔗 https://pump.fun/{mint}\n"
+                f"📱 <a href=\"bitkeep://dapp?url=https://pump.fun/{mint}\">Bitget Walletで開く</a>"
             )
             send_telegram(msg)
             print(f"[Pump.fun] 🟣 早期通知送信完了: {mint[:20]}")
@@ -611,7 +610,8 @@ def _process_solana_token(mint):
             f"{wallet_text}\n"
             f"{wallet_judge}\n\n"
             f"📊 https://dexscreener.com/solana/{mint}\n"
-            f"🔗 https://pump.fun/{mint}"
+            f"🔗 https://pump.fun/{mint}\n"
+            f"📱 <a href=\"bitkeep://dapp?url=https://pump.fun/{mint}\">Bitget Walletで開く</a>"
         )
         send_telegram(msg)
         print(f"[Pump.fun] 🚀 確定通知送信完了: {mint[:20]}")
@@ -633,7 +633,7 @@ def check_pumpfun_onchain():
         sig = tx_info.get("signature", "")
         if not sig or tx_info.get("err"):
             continue
-        time.sleep(0.1)  # Heliusレート制限対策
+        time.sleep(0.1)
         mint = parse_new_token(sig)
         if not mint or mint in known_token_mints:
             continue
