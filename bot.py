@@ -33,6 +33,9 @@ SPL_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 POOL_CREATED_TOPIC      = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"  # PancakeSwap V3
 UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"  # Uniswap V3 on Base
+# PancakeSwap V2 の PairCreated イベントトピック（BSCミームトークンの主流）
+PAIR_CREATED_TOPIC      = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
+PANCAKE_V2_FACTORY_BSC  = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"  # PancakeSwap V2
 
 # BSC の「ベーストークン」= 新規トークンとして扱わないアドレス（小文字で統一）
 BSC_BASE_TOKENS = {
@@ -89,17 +92,33 @@ EVM_CHAINS = [
 # ── EVM全般監視チェーン（PoolCreated経由で全launchpad対応）─────────────────────
 EVM_ALL_CHAINS = [
     {
-        "name": "BNB Chain全般", "emoji": "🟡",
-        # PancakeSwap V3 Factory監視（FourMeme以外のBSC全launchpad対応）
+        "name": "BNB Chain全般(V2)", "emoji": "🟡",
+        # PancakeSwap V2 Factory監視（BSCミームトークンの主流はV2）
+        "rpc_list": [
+            "https://bsc-mainnet.public.blastapi.io",
+            "https://1rpc.io/bnb",
+            "https://bsc-rpc.publicnode.com",
+        ],
+        "factory":      PANCAKE_V2_FACTORY_BSC,
+        "topic":        PAIR_CREATED_TOPIC,   # V2: PairCreated
+        "base_tokens":  BSC_BASE_TOKENS,
+        "dex_url":      "https://dexscreener.com/bsc/{}",
+        "known_tokens": _BSC_KNOWN,  # FourMeme/V3と共有（二重通知防止）
+        "last_block":   None,
+    },
+    {
+        "name": "BNB Chain全般(V3)", "emoji": "🟡",
+        # PancakeSwap V3 Factory監視（V3プールを使う一部トークン対応）
         "rpc_list": [
             "https://bsc-mainnet.public.blastapi.io",
             "https://1rpc.io/bnb",
             "https://bsc-rpc.publicnode.com",
         ],
         "factory":      PANCAKE_V3_FACTORY_BSC,
+        "topic":        POOL_CREATED_TOPIC,   # V3: PoolCreated
         "base_tokens":  BSC_BASE_TOKENS,
         "dex_url":      "https://dexscreener.com/bsc/{}",
-        "known_tokens": _BSC_KNOWN,  # FourMemeと共有（二重通知防止）
+        "known_tokens": _BSC_KNOWN,  # FourMeme/V2と共有（二重通知防止）
         "last_block":   None,
     },
     {
@@ -111,6 +130,7 @@ EVM_ALL_CHAINS = [
             "https://base.llamarpc.com",
         ],
         "factory":      UNISWAP_V3_FACTORY_BASE,
+        "topic":        POOL_CREATED_TOPIC,   # V3: PoolCreated
         "base_tokens":  BASE_BASE_TOKENS,
         "dex_url":      "https://dexscreener.com/base/{}",
         "known_tokens": _BASE_KNOWN,  # Clankerと共有（二重通知防止）
@@ -486,14 +506,14 @@ def check_evm_chain(chain):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EVM 全般監視 (PancakeSwap V3 / Uniswap V3 PoolCreated)
+# EVM 全般監視 (PancakeSwap V2/V3 / Uniswap V3)
 # FourMeme/Clanker以外の全launchpadトークンを対象とする
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_all_token(token_address, chain):
     """
     BNB Chain全般 / Base全般 の新規トークン通知スレッド。
-    PancakeSwap V3 / Uniswap V3 の PoolCreated 経由で検知されたトークンを処理。
+    PancakeSwap V2/V3 / Uniswap V3 経由で検知されたトークンを処理。
     FourMeme/Clanker既知トークンは known_tokens 共有により除外済み。
     """
     try:
@@ -547,7 +567,7 @@ def _process_evm_all_token(token_address, chain):
 
 def check_evm_all_chain(chain):
     """
-    DEX Factory の PoolCreated イベントを監視し、新規トークンを検知する。
+    DEX Factory の PairCreated(V2) / PoolCreated(V3) イベントを監視し、新規トークンを検知。
     token0/token1 のうちベーストークン（WBNB/WETH/USDC等）でない方を新規トークンとして処理。
     known_tokens を FourMeme/Clanker と共有することで二重通知を防止。
     """
@@ -570,18 +590,20 @@ def check_evm_all_chain(chain):
         if from_block > latest_int:
             return
 
+        # V2(PairCreated) / V3(PoolCreated) でトピックが異なるため chain["topic"] を使用
+        event_topic = chain.get("topic", POOL_CREATED_TOPIC)
         logs = evm_rpc(chain, "eth_getLogs", [{
             "fromBlock": hex(from_block),
             "toBlock":   hex(latest_int),
             "address":   chain["factory"],
-            "topics":    [POOL_CREATED_TOPIC],
+            "topics":    [event_topic],
         }])
         chain["last_block"] = latest_int
 
         if not logs:
             return
 
-        print(f"[{chain['name']}] {len(logs)}件のPoolCreatedイベント検知")
+        print(f"[{chain['name']}] {len(logs)}件のPair/PoolCreatedイベント検知")
 
         base_tokens = chain["base_tokens"]
         for log in logs:
@@ -1345,6 +1367,7 @@ def main():
         "🟡 Solana全般 早期検知（60秒・50人）\n"
         "🟢 Solana全般 確定通知（3分・50人）\n"
         "🟡 DEX: FourMeme / BSC\n"
+        "🟡 DEX: BNB Chain全般（PancakeSwap V2）← 主流\n"
         "🟡 DEX: BNB Chain全般（PancakeSwap V3）\n"
         "🔵 DEX: Clanker / Base\n"
         "🔵 DEX: Base全般（Uniswap V3）\n\n"
@@ -1380,7 +1403,7 @@ def main():
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
         for chain in EVM_ALL_CHAINS:
-            check_evm_all_chain(chain)  # PoolCreated経由で全launchpad対応
+            check_evm_all_chain(chain)  # PairCreated/PoolCreated経由で全launchpad対応
 
         time.sleep(30)  # 20→30秒（コスト削減）
         loop += 1
