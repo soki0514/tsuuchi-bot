@@ -185,8 +185,7 @@ def evm_rpc(chain, method, params):
                 if r.status_code == 200:
                     data = r.json()
                     if "error" in data:
-                        err = data["error"]
-                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
+                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {data['error']}")
                         break
                     return data.get("result")
                 print(f"[{chain['name']}] HTTP {r.status_code} ({rpc_url.split('/')[2]}) → 次のRPCへ")
@@ -579,8 +578,7 @@ def _process_solana_token(mint):
                 f"{dex_text}\n"
                 f"⚡ ボンディングカーブ中（Raydium未移行）\n\n"
                 f"📊 https://dexscreener.com/solana/{mint}\n"
-                f"🔗 https://pump.fun/{mint}\n"
-                f"📱 <a href=\"bitkeep://dapp?url=https://pump.fun/{mint}\">Bitget Walletで開く</a>"
+                f"🔗 <a href=\"https://pump.fun/{mint}\">pump.fun（Bitget Walletで開く）</a>"
             )
             send_telegram(msg)
             print(f"[Pump.fun] 🟣 早期通知送信完了: {mint[:20]}")
@@ -616,8 +614,7 @@ def _process_solana_token(mint):
             f"{wallet_text}\n"
             f"{wallet_judge}\n\n"
             f"📊 https://dexscreener.com/solana/{mint}\n"
-            f"🔗 https://pump.fun/{mint}\n"
-            f"📱 <a href=\"bitkeep://dapp?url=https://pump.fun/{mint}\">Bitget Walletで開く</a>"
+            f"🔗 <a href=\"https://pump.fun/{mint}\">pump.fun（Bitget Walletで開く）</a>"
         )
         send_telegram(msg)
         print(f"[Pump.fun] 🚀 確定通知送信完了: {mint[:20]}")
