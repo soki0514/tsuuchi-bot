@@ -52,7 +52,7 @@ EVM_CHAINS = [
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/Firefox/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json",
 }
 
@@ -390,25 +390,38 @@ def solana_rpc(method, params):
 
 
 def get_new_pumpfun_transactions():
+    """
+    last_signature以降の全新規TXをページネーションで取得。
+    - 通常時（last_signatureあり）: until指定で新規TXを全件取得
+    - 初回/初期化失敗時（last_signatureなし）: 最新50件のみ取得（遡り暴走防止）
+    """
     global last_signature
-    all_txns = []
-    before   = None
+    all_txns   = []
+    before     = None
+    is_catchup = (last_signature is None)  # 初回または初期化失敗フラグ
 
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature
+            opts["until"] = last_signature  # これ以降（新しい側）を取得
         if before:
-            opts["before"] = before
+            opts["before"] = before         # ページネーション用
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
             break
 
         all_txns.extend(result)
+
         if len(result) < 50:
+            break  # 50件未満 = 全件取得完了
+
+        # 初回/初期化失敗時は最新50件だけで打ち切り（5000件遡り暴走防止）
+        if is_catchup:
+            print(f"[Pump.fun] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
 
+        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
         time.sleep(0.1)
 
@@ -668,6 +681,7 @@ def main():
         "・並列処理で待機中も他チェーンを継続監視"
     )
 
+    # Solana初期化: 起動時点の最新sigを記録し、過去mintを無視
     print("[Pump.fun] 初期化中...")
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
