@@ -166,6 +166,30 @@ RETRY_SIG_QUEUE = []               # [(signature, enqueued_time), ...]
 RETRY_SIG_LOCK  = threading.Lock()
 RETRY_EXPIRY    = 300              # 秒: 5分
 
+# ── Solana RPCグローバルレート制限（8 RPS）────────────────────────────────────
+# 全スレッド合計で1秒間に8回までしかSolana RPCを呼べないよう制限する。
+# Helius無料枠(10 RPS)に対して2つのマージンを確保し429エラーを防ぐ。
+_SOLANA_RPS_LIMIT  = 8
+_solana_rpc_times  = []            # 直近1秒間のRPC呼び出しタイムスタンプ
+_solana_rpc_lock   = threading.Lock()
+
+
+def _wait_for_rpc_slot():
+    """
+    スライディングウィンドウ方式で8 RPSを超えないよう待機する。
+    全スレッドで共有されるグローバルレート制限。
+    """
+    global _solana_rpc_times
+    while True:
+        with _solana_rpc_lock:
+            now = time.time()
+            # 1秒以上前のタイムスタンプを削除
+            _solana_rpc_times = [t for t in _solana_rpc_times if now - t < 1.0]
+            if len(_solana_rpc_times) < _SOLANA_RPS_LIMIT:
+                _solana_rpc_times.append(now)
+                return
+        time.sleep(0.05)  # 50ms待ってリトライ
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TELEGRAM
@@ -676,6 +700,7 @@ def check_evm_all_chain(chain):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def solana_rpc(method, params):
+    _wait_for_rpc_slot()  # グローバル8 RPSレート制限
     for attempt in range(4):
         try:
             r = requests.post(SOLANA_RPC, json={
@@ -772,6 +797,7 @@ def parse_new_token(signature):
         # False = getTransaction完全失敗（リトライ対象）
         # None  = TX取得成功だが新規mintなし（リトライ不要）
         return False
+
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
     pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
     pre_mints = {b.get("mint") for b in pre_balances}
@@ -1110,7 +1136,6 @@ def analyze_wallets(token_address):
             sig = sig_info.get("signature", "")
             if not sig:
                 continue
-            time.sleep(0.4)  # 0.2→0.4秒（429対策）
             tx = solana_rpc("getTransaction", [
                 sig, {"encoding": "json", "maxSupportedTransactionVersion": 0},
             ])
