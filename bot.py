@@ -2,6 +2,7 @@ import requests
 import time
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 # ── 環境変数 ──────────────────────────────────────────────────────────────────
@@ -236,6 +237,18 @@ _SOLANA_SEMAPHORE = threading.Semaphore(8)
 # "新しいスレッドを開始できません"エラーが発生する。
 # 同時に最大50スレッドまでに制限する（超過分はブロック待機）。
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
+
+# ── Workerスレッドプール（OSスレッド枯渇の根本対策）──────────────────────────
+# _handle_pumpfun_sig / _handle_metadata_sig / _handle_raydium_tx は
+# _SOLANA_SEMAPHORE(8) でブロック待機するため、バッチごとに50件ずつ
+# スレッドを生成し続けるとOSのスレッド上限に到達する。
+# ThreadPoolExecutor はスレッドを再利用するため上限到達が発生しない。
+#   Pump.fun:   最大20並列（10秒バッチ50件を20スレッドで処理）
+#   Solana全般: 最大20並列（15秒バッチ200件を20スレッドで処理）
+#   Raydium:    最大20並列（10秒バッチ50件×2プログラムを20スレッドで処理）
+_PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=20, thread_name_prefix="pumpfun")
+_SOLANA_ALL_POOL = ThreadPoolExecutor(max_workers=20, thread_name_prefix="solana_all")
+_RAYDIUM_POOL    = ThreadPoolExecutor(max_workers=20, thread_name_prefix="raydium")
 
 # ── 検知漏れ防止: getTransaction失敗シグネチャのリトライキュー ──────────────
 # parse_new_tokenでgetTransactionが全試行失敗した場合にここへ保存し、
@@ -1190,6 +1203,10 @@ def parse_new_fungible_mint(signature):
     return None  # mintなし（メタデータ更新TXなど）
 
 
+
+
+
+
 def get_solana_holder_stats(mint):
     """
     getTokenLargestAccounts + getTokenSupply で実際の保有量トップ10データを取得。
@@ -1225,6 +1242,8 @@ def get_solana_holder_stats(mint):
     except Exception as e:
         print(f"[保有量取得エラー] {e}")
         return None
+
+
 
 
 def format_holder_output(holder_data):
@@ -1320,6 +1339,8 @@ def get_evm_holder_stats(token_address, chain, from_block):
     except Exception as e:
         print(f"[{chain['name']}] EVM保有量トップ10取得エラー: {e}")
         return None
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1493,10 +1514,8 @@ def check_pumpfun_onchain():
     if not sigs:
         return
     print(f"[Pump.fun] {len(sigs)}件を並列処理開始")
-    workers = [threading.Thread(target=_handle_pumpfun_sig, args=(sig,), daemon=True)
-               for sig in sigs]
-    for w in workers:
-        w.start()
+    for sig in sigs:
+        _PUMPFUN_POOL.submit(_handle_pumpfun_sig, sig)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1608,6 +1627,8 @@ def get_new_metadata_transactions():
     return all_txns
 
 
+
+
 def _get_platform_name(dex):
     """DexScreener の dex_id から launchpad名を返す"""
     if not dex:
@@ -1686,10 +1707,8 @@ def check_all_solana_onchain():
     if not sigs:
         return
     print(f"[Solana全般] {len(sigs)}件を並列処理開始")
-    workers = [threading.Thread(target=_handle_metadata_sig, args=(sig,), daemon=True)
-               for sig in sigs]
-    for w in workers:
-        w.start()
+    for sig in sigs:
+        _SOLANA_ALL_POOL.submit(_handle_metadata_sig, sig)
 
 
 def pumpfun_monitor_loop():
@@ -1904,10 +1923,8 @@ def check_raydium_onchain():
             continue
 
         print(f"[{label}] {len(sigs)}件を並列処理開始")
-        workers = [threading.Thread(target=_handle_raydium_tx, args=(sig,), daemon=True)
-                   for sig in sigs]
-        for w in workers:
-            w.start()
+        for sig in sigs:
+            _RAYDIUM_POOL.submit(_handle_raydium_tx, sig)
 
 
 def raydium_monitor_loop():
