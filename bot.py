@@ -244,11 +244,11 @@ _MONITOR_SEMAPHORE = threading.Semaphore(50)
 # スレッドを生成し続けるとOSのスレッド上限に到達する。
 # ThreadPoolExecutor はスレッドを再利用するため上限到達が発生しない。
 #   Pump.fun:   最大20並列（10秒バッチ50件を20スレッドで処理）
-#   Solana全般: 最大20並列（15秒バッチ200件を20スレッドで処理）
-#   Raydium:    最大20並列（10秒バッチ50件×2プログラムを20スレッドで処理）
-_PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=20, thread_name_prefix="pumpfun")
-_SOLANA_ALL_POOL = ThreadPoolExecutor(max_workers=20, thread_name_prefix="solana_all")
-_RAYDIUM_POOL    = ThreadPoolExecutor(max_workers=20, thread_name_prefix="raydium")
+#   Solana全般: 最大8並列（_SOLANA_RPS_LIMIT=8に合わせて3プール合計24 RPSを抑制）
+#   Raydium:    最大8並列（3プール×8=24スレッドが_wait_for_rpc_slotで8 RPS以内に調整）
+_PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
+_SOLANA_ALL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="solana_all")
+_RAYDIUM_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="raydium")
 
 # ── 検知漏れ防止: getTransaction失敗シグネチャのリトライキュー ──────────────
 # parse_new_tokenでgetTransactionが全試行失敗した場合にここへ保存し、
