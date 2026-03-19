@@ -24,74 +24,60 @@ ZERO_TOPIC      = "0x00000000000000000000000000000000000000000000000000000000000
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
 # ── Solana全般監視: SPL Token Metadata Program (全launchpad対応) ───────────────
-# pump.fun / rapidlaunch.io / moonshot など、Solanaの全launchpadはこのプログラムに
-# トークンのメタデータ(名前・シンボル)を登録するため、ここを見れば全て拾える
 SPL_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 
 # ── Raydium直接監視定数 ──────────────────────────────────────────────────────
-# Raydium AMM V4 (旧来の標準AMM) と CPMM (新型) の両プログラムを監視
 RAYDIUM_AMM_V4    = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 RAYDIUM_CPMM      = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
 WSOL_MINT         = "So11111111111111111111111111111111111111112"
 USDC_MINT         = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 USDT_MINT         = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-# プール作成TXの新規mintと判定しないベーストークン一覧
 SOLANA_BASE_TOKENS = {
-    WSOL_MINT,   # Wrapped SOL
-    USDC_MINT,   # USDC
-    USDT_MINT,   # USDT
-    "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  # mSOL
-    "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",  # stSOL
+    WSOL_MINT,
+    USDC_MINT,
+    USDT_MINT,
+    "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+    "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
 }
 
 # ── EVM全般監視定数 ────────────────────────────────────────────────────────────
-# Uniswap V3 / PancakeSwap V3 共通の PoolCreated イベントトピック
 POOL_CREATED_TOPIC      = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
-PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"  # PancakeSwap V3
-UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"  # Uniswap V3 on Base
-# PancakeSwap V2 の PairCreated イベントトピック（BSCミームトークンの主流）
+PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
 PAIR_CREATED_TOPIC      = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
-PANCAKE_V2_FACTORY_BSC  = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"  # PancakeSwap V2
+PANCAKE_V2_FACTORY_BSC  = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
 
-# 流動性追加イベント（Mint）トピック
-# V2: Mint(address indexed sender, uint256 amount0, uint256 amount1)
 V2_MINT_TOPIC = "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f"
-# V3: Mint(address sender, address indexed owner, int24 indexed tickLower,
-#          int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)
 V3_MINT_TOPIC = "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde"
 
-# BSC の「ベーストークン」= 新規トークンとして扱わないアドレス（小文字で統一）
 BSC_BASE_TOKENS = {
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
-    "0x55d398326f99059ff775485246999027b3197955",  # USDT (BSC)
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC (BSC)
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH (BSC)
-    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI (BSC)
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "0x55d398326f99059ff775485246999027b3197955",
+    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
 }
-# Base の「ベーストークン」
 BASE_BASE_TOKENS = {
-    "0x4200000000000000000000000000000000000006",  # WETH
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC (Base)
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",  # DAI (Base)
-    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",  # USDbC
-    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",  # cbETH
+    "0x4200000000000000000000000000000000000006",
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
 }
 
 # ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
-# Chainlink価格フィード（BNB/USD・ETH/USD）
-CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"  # BSC
-CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"  # Base
+CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
+CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
 
-# ステーブルコインアドレス → そのままUSD換算可能（小文字）
 STABLE_ADDRS = {
-    "0x55d398326f99059ff775485246999027b3197955",  # USDT BSC  (18 dec)
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC BSC  (18 dec)
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD BSC  (18 dec)
-    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI  BSC  (18 dec)
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC Base  (6 dec)
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",  # DAI  Base (18 dec)
-    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",  # USDbC Base  (6 dec)
+    "0x55d398326f99059ff775485246999027b3197955",
+    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+    "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
 }
 STABLE_DECIMALS = {
     "0x55d398326f99059ff775485246999027b3197955": 18,
@@ -102,19 +88,16 @@ STABLE_DECIMALS = {
     "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": 18,
     "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": 6,
 }
-# ネイティブトークン（Chainlinkで価格取得が必要・18 dec）
 NATIVE_ADDRS = {
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
-    "0x4200000000000000000000000000000000000006",  # WETH (Base)
-    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",  # cbETH (Base)
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH on BSC
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+    "0x4200000000000000000000000000000000000006",
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
 }
 
-# ネイティブ価格キャッシュ: chain_name → (price_usd, timestamp)
 _native_price_cache: dict = {}
-PRICE_CACHE_SEC = 300  # 5分
+PRICE_CACHE_SEC = 300
 
-# launchpad固有監視と全般監視でknown_tokensを共有し二重通知を防ぐ
 _BSC_KNOWN  = set()
 _BASE_KNOWN = set()
 
@@ -122,7 +105,6 @@ _BASE_KNOWN = set()
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
-        # eth_getLogs対応のRPCのみ使用（dataseedはgetLogs非対応）
         "rpc_list": [
             "https://bsc-mainnet.public.blastapi.io",
             "https://1rpc.io/bnb",
@@ -131,72 +113,70 @@ EVM_CHAINS = [
         "contract": "0x5c952063c7fc8610ffdb798152d69f0b9550762b",
         "dex_url": "https://dexscreener.com/bsc/{}",
         "launch_url": "https://four.meme",
-        "known_tokens": _BSC_KNOWN, "last_block": None,  # BNB Chain全般と共有
+        "known_tokens": _BSC_KNOWN, "last_block": None,
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        # publicnode → mainnet.base.org → drpc の順
+        # mainnet.base.org → drpc → publicnode の順
         # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
+        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
         "rpc_list": [
-            "https://base-rpc.publicnode.com",
             "https://mainnet.base.org",
             "https://base.drpc.org",
+            "https://base-rpc.publicnode.com",
         ],
         "contract": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
         "dex_url": "https://dexscreener.com/base/{}",
         "launch_url": "https://www.clanker.world",
-        "known_tokens": _BASE_KNOWN, "last_block": None,  # Base全般と共有
+        "known_tokens": _BASE_KNOWN, "last_block": None,
     },
 ]
 
-# ── EVM全般監視チェーン（PoolCreated経由で全launchpad対応）─────────────────────
 EVM_ALL_CHAINS = [
     {
         "name": "BNB Chain全般(V2)", "emoji": "🟡",
-        # PancakeSwap V2 Factory監視（BSCミームトークンの主流はV2）
         "rpc_list": [
             "https://bsc-mainnet.public.blastapi.io",
             "https://1rpc.io/bnb",
             "https://bsc-rpc.publicnode.com",
         ],
         "factory":      PANCAKE_V2_FACTORY_BSC,
-        "topic":        PAIR_CREATED_TOPIC,   # V2: PairCreated
+        "topic":        PAIR_CREATED_TOPIC,
         "base_tokens":  BSC_BASE_TOKENS,
         "dex_url":      "https://dexscreener.com/bsc/{}",
-        "known_tokens": _BSC_KNOWN,  # FourMeme/V3と共有（二重通知防止）
+        "known_tokens": _BSC_KNOWN,
         "last_block":   None,
-        "top10_max_pct": 80.0,  # BSCミームは保有集中が多いため80%に緩和
+        "top10_max_pct": 80.0,
     },
     {
         "name": "BNB Chain全般(V3)", "emoji": "🟡",
-        # PancakeSwap V3 Factory監視（V3プールを使う一部トークン対応）
         "rpc_list": [
             "https://bsc-mainnet.public.blastapi.io",
             "https://1rpc.io/bnb",
             "https://bsc-rpc.publicnode.com",
         ],
         "factory":      PANCAKE_V3_FACTORY_BSC,
-        "topic":        POOL_CREATED_TOPIC,   # V3: PoolCreated
+        "topic":        POOL_CREATED_TOPIC,
         "base_tokens":  BSC_BASE_TOKENS,
         "dex_url":      "https://dexscreener.com/bsc/{}",
-        "known_tokens": _BSC_KNOWN,  # FourMeme/V2と共有（二重通知防止）
+        "known_tokens": _BSC_KNOWN,
         "last_block":   None,
     },
     {
         "name": "Base全般", "emoji": "🔵",
-        # Uniswap V3 Factory監視（Clanker以外のBase全launchpad対応）
-        # publicnode → mainnet.base.org → drpc の順
+        # mainnet.base.org → drpc → publicnode の順
         # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
+        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
         "rpc_list": [
-            "https://base-rpc.publicnode.com",
             "https://mainnet.base.org",
             "https://base.drpc.org",
+            "https://base-rpc.publicnode.com",
         ],
         "factory":      UNISWAP_V3_FACTORY_BASE,
-        "topic":        POOL_CREATED_TOPIC,   # V3: PoolCreated
+        "topic":        POOL_CREATED_TOPIC,
         "base_tokens":  BASE_BASE_TOKENS,
         "dex_url":      "https://dexscreener.com/base/{}",
-        "known_tokens": _BASE_KNOWN,  # Clankerと共有（二重通知防止）
+        "known_tokens": _BASE_KNOWN,
         "last_block":   None,
     },
 ]
@@ -208,112 +188,60 @@ HEADERS = {
 
 # ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
-known_token_mints = set()   # pump.fun + Solana全般 + Raydium共通（重複通知防止）
-last_signature    = None    # pump.fun 用
-all_solana_last_signature = None  # Solana全般（Metadata Program）用
+known_token_mints = set()
+last_signature    = None
+all_solana_last_signature = None
 
-# Raydium直接監視: 各プログラムの最終処理済みシグネチャ
 raydium_last_sigs = {RAYDIUM_AMM_V4: None, RAYDIUM_CPMM: None}
 
-# SOL価格キャッシュ: [price_usd, timestamp]
 _sol_price_cache  = [None, 0.0]
 
-# ── 閾値ベース通知フィルター ──────────────────────────────────────────────────
-LIQUIDITY_MIN       = 10_000   # 流動性閾値（USD）: これ以上で通知候補
-TOP10_MAX_PCT       = 60.0     # トップ10保有率上限（%）: これ超えでスキップ
-POLL_INTERVAL_SEC   = 3        # DexScreenerポーリング間隔（秒）: 10→3秒
-MONITOR_TIMEOUT_SEC = 300      # 監視タイムアウト（5分）: 未達成はスキップ
+LIQUIDITY_MIN       = 10_000
+TOP10_MAX_PCT       = 60.0
+POLL_INTERVAL_SEC   = 3
+MONITOR_TIMEOUT_SEC = 300
 
-# ── スレッドセーフ: known_token_mintsの競合書き込み防止 ─────────────────────
-# pump.fun（バックグラウンド）とSolana全般（バックグラウンド）が同時に
-# 同一mintを検知して二重通知するのを防ぐ
 KNOWN_MINTS_LOCK = threading.Lock()
 
-# ── Solana同時getTransaction上限（429対策）────────────────────────────────────
-# 全スレッド合計で同時にgetTransactionを呼べるのは6つまで。
-# _SOLANA_RPS_LIMIT=6 と揃えることで同時RPC数がRPS制限を超えないよう制御する。
 _SOLANA_SEMAPHORE = threading.Semaphore(6)
-
-# ── 5分監視スレッド同時実行上限（OSスレッド枯渇対策）────────────────────────
-# _process_solana_token / _process_raydium_token は最大5分生き続ける。
-# 無制限に起動するとOSのスレッド上限(32768)に到達し
-# "新しいスレッドを開始できません"エラーが発生する。
-# 同時に最大50スレッドまでに制限する（超過分はブロック待機）。
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
 
-# ── Workerスレッドプール（OSスレッド枯渇の根本対策）──────────────────────────
-# _handle_pumpfun_sig / _handle_metadata_sig / _handle_raydium_tx は
-# _SOLANA_SEMAPHORE(8) でブロック待機するため、バッチごとに50件ずつ
-# スレッドを生成し続けるとOSのスレッド上限に到達する。
-# ThreadPoolExecutor はスレッドを再利用するため上限到達が発生しない。
-#   Pump.fun:   最大20並列（10秒バッチ50件を20スレッドで処理）
-#   Solana全般: 最大8並列（_SOLANA_RPS_LIMIT=8に合わせて3プール合計24 RPSを抑制）
-#   Raydium:    最大8並列（3プール×8=24スレッドが_wait_for_rpc_slotで8 RPS以内に調整）
 _PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
 _SOLANA_ALL_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="solana_all")
 _RAYDIUM_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="raydium")
 
-# ── 検知漏れ防止: getTransaction失敗シグネチャのリトライキュー ──────────────
-# parse_new_tokenでgetTransactionが全試行失敗した場合にここへ保存し、
-# 次のメインループで再試行する（5分以内に成功しなければ破棄）
-RETRY_SIG_QUEUE = []               # [(signature, enqueued_time), ...]
+RETRY_SIG_QUEUE = []
 RETRY_SIG_LOCK  = threading.Lock()
-RETRY_EXPIRY    = 300              # 秒: 5分
+RETRY_EXPIRY    = 300
 
-# ── Solana RPCグローバルレート制限（6 RPS）────────────────────────────────────
-# 全スレッド合計で1秒間に6回までしかSolana RPCを呼べないよう制限する。
-# worker×3プール+monitor+loopスレッドが同時にRPCを叩くため
-# Helius無料枠(10 RPS)に対して4つのマージンを確保し429エラーを根絶する。
 _SOLANA_RPS_LIMIT  = 6
-_solana_rpc_times  = []            # 直近1秒間のRPC呼び出しタイムスタンプ
+_solana_rpc_times  = []
 _solana_rpc_lock   = threading.Lock()
 
 
 def _wrapped_process_solana(mint, label="Pump.fun", is_pumpfun=True):
-    """
-    _process_solana_token を _MONITOR_SEMAPHORE で保護したラッパー。
-    同時50スレッドを超えた場合はブロック待機してから実行する。
-    スレッド対象はこちらを使い _process_solana_token は直接呼ばない。
-    """
     with _MONITOR_SEMAPHORE:
         _process_solana_token(mint, label, is_pumpfun)
 
 
 def _wrapped_process_raydium(mint, liq_usd):
-    """
-    _process_raydium_token を _MONITOR_SEMAPHORE で保護したラッパー。
-    同時50スレッドを超えた場合はブロック待機してから実行する。
-    """
     with _MONITOR_SEMAPHORE:
         _process_raydium_token(mint, liq_usd)
 
 
 def _wait_for_rpc_slot():
-    """
-    スライディングウィンドウ方式で8 RPSを超えないよう待機する。
-    全スレッドで共有されるグローバルレート制限。
-    """
     global _solana_rpc_times
     while True:
         with _solana_rpc_lock:
             now = time.time()
-            # 1秒以上前のタイムスタンプを削除
             _solana_rpc_times = [t for t in _solana_rpc_times if now - t < 1.0]
             if len(_solana_rpc_times) < _SOLANA_RPS_LIMIT:
                 _solana_rpc_times.append(now)
                 return
-        time.sleep(0.05)  # 50ms待ってリトライ
+        time.sleep(0.05)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana SOL価格取得（Jupiter Price API）
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _get_sol_price_usd():
-    """
-    Jupiter Price APIからSOL/USDを取得。5分キャッシュ。
-    失敗時はキャッシュ値を返す（なければ150ドルのデフォルト値）。
-    """
     global _sol_price_cache
     now = time.time()
     if _sol_price_cache[0] and now - _sol_price_cache[1] < PRICE_CACHE_SEC:
@@ -331,13 +259,8 @@ def _get_sol_price_usd():
                 return price
     except Exception as e:
         print(f"[SOL価格] 取得エラー: {e}")
-    # フォールバック: キャッシュが古くても使う、なければ$150
     return _sol_price_cache[0] if _sol_price_cache[0] else 150.0
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TELEGRAM
-# ══════════════════════════════════════════════════════════════════════════════
 
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
@@ -359,12 +282,6 @@ def send_telegram(message):
         print(f"Telegram接続エラー: {e}")
 
 
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# DEXSCREENER
-# ══════════════════════════════════════════════════════════════════════════════
-
 def analyze_dexscreener(token_address):
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
@@ -380,26 +297,14 @@ def analyze_dexscreener(token_address):
             "buys_5m":         (pair.get("txns") or {}).get("m5", {}).get("buys", 0) or 0,
             "sells_5m":        (pair.get("txns") or {}).get("m5", {}).get("sells", 0) or 0,
             "price_change_5m": (pair.get("priceChange") or {}).get("m5", 0) or 0,
-            "dex_id":          pair.get("dexId", ""),   # launchpad特定用
+            "dex_id":          pair.get("dexId", ""),
         }
     except Exception as e:
         print(f"DexScreenerエラー: {e}")
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PUMP.FUN 独自API（DexScreenerより高速・インデックス遅延なし）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def analyze_pumpfun_api(mint):
-    """
-    pump.fun 独自APIでトークンデータを取得。
-    DexScreenerのインデックス遅延（30〜90秒）を排除し 5〜15秒で応答。
-    bonding curve卒業前はusd_market_capを流動性代わりに使用。
-    戻り値: {"liquidity": float, "complete": bool, "name": str, "symbol": str} / None
-    Cloudflare(530)対策: pump.fun同一オリジンに見せるブラウザ偽装ヘッダーを使用。
-    """
-    # Cloudflare回避: pump.fun内部リクエストに見せかけるヘッダー
     _pf_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
@@ -425,11 +330,11 @@ def analyze_pumpfun_api(mint):
             print(f"[Pump.fun API] 空レスポンス ({mint[:16]})")
             return None
         usd_market_cap = float(data.get("usd_market_cap") or 0)
-        complete       = bool(data.get("complete", False))  # True=Raydiumに卒業済み
+        complete       = bool(data.get("complete", False))
         name           = data.get("name", "")
         symbol         = data.get("symbol", "")
         return {
-            "liquidity": usd_market_cap,  # market capを流動性の代替として使用
+            "liquidity": usd_market_cap,
             "complete":  complete,
             "name":      name,
             "symbol":    symbol,
@@ -439,18 +344,10 @@ def analyze_pumpfun_api(mint):
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM RPC
-# ══════════════════════════════════════════════════════════════════════════════
-
 def evm_rpc(chain, method, params):
-    """
-    rpc_list内のRPCを順番に試す。全て失敗した場合はNoneを返す。
-    503/no responseなどでフェイルしたRPCはスキップし次のURLへ。
-    """
     rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
     for rpc_url in rpc_list:
-        for attempt in range(2):  # 各RPCは2回まで試す
+        for attempt in range(2):
             try:
                 r = requests.post(rpc_url, json={
                     "jsonrpc": "2.0", "id": 1,
@@ -460,12 +357,11 @@ def evm_rpc(chain, method, params):
                     data = r.json()
                     if "error" in data:
                         err = data["error"]
-                        # "no response"などは次のRPCへ
                         print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
-                        break  # このRPCを諦め次のURLへ
+                        break
                     return data.get("result")
                 print(f"[{chain['name']}] HTTP {r.status_code} ({rpc_url.split('/')[2]}) → 次のRPCへ")
-                break  # 4xx/5xxは即次のRPCへ
+                break
             except Exception as e:
                 print(f"[{chain['name']}] 接続エラー ({rpc_url.split('/')[2]}) attempt{attempt+1}: {e}")
                 if attempt < 1:
@@ -473,15 +369,7 @@ def evm_rpc(chain, method, params):
     return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# オンチェーン流動性チェック（getReserves / balanceOf / Chainlink）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _get_native_price_usd(chain):
-    """
-    ChainlinkからBNB(BSC)またはETH(Base)のUSD価格を取得。
-    5分キャッシュ。失敗時はキャッシュ値を返す（なければNone）。
-    """
     global _native_price_cache
     chain_name = chain["name"]
     now = time.time()
@@ -490,33 +378,23 @@ def _get_native_price_usd(chain):
         return cached[0]
 
     feed = CHAINLINK_BNB_USD if "BSC" in chain_name or "BNB" in chain_name else CHAINLINK_ETH_USD
-    # latestRoundData() selector: 0xfeaf968c
-    # returns: (roundId, answer, startedAt, updatedAt, answeredInRound)
-    # answer は index=1 (2番目の32バイト), 8 decimal
     result = evm_rpc(chain, "eth_call", [{"to": feed, "data": "0xfeaf968c"}, "latest"])
     if result and len(result) >= 130:
-        answer = int(result[66:130], 16)   # 2番目の32バイト
+        answer = int(result[66:130], 16)
         price  = answer / 1e8
         _native_price_cache[chain_name] = (price, now)
         print(f"[{chain_name}] ネイティブ価格更新: ${price:,.0f}")
         return price
 
-    # Chainlink失敗 → キャッシュが古くても使う
     return cached[0] if cached else None
 
 
 def _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain):
-    """
-    PancakeSwap V2ペアの getReserves() を呼びUSD換算で流動性を返す。
-    失敗・不明ペア → None。
-    """
     try:
-        # getReserves() selector: 0x0902f1ac
-        # returns: uint112 reserve0, uint112 reserve1, uint32 timestamp
         r = evm_rpc(chain, "eth_call", [{"to": pair_addr, "data": "0x0902f1ac"}, "latest"])
         if not r or len(r) < 130:
             return None
-        d        = r[2:]                     # "0x" を除去
+        d        = r[2:]
         reserve0 = int(d[0:64],  16)
         reserve1 = int(d[64:128], 16)
         if reserve0 == 0 and reserve1 == 0:
@@ -534,7 +412,7 @@ def _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain):
         if t0 in NATIVE_ADDRS:
             p = _get_native_price_usd(chain)
             return (reserve0 / 1e18) * p if p else None
-        return None  # ベーストークン不明
+        return None
 
     except Exception as e:
         print(f"[{chain['name']}] getReserves エラー: {e}")
@@ -542,12 +420,7 @@ def _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain):
 
 
 def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
-    """
-    Uniswap/PancakeSwap V3プールの balanceOf() でUSD換算流動性を返す。
-    失敗・不明ペア → None。
-    """
     def _balance_of(token_addr):
-        # balanceOf(address) selector: 0x70a08231
         data = "0x70a08231" + "000000000000000000000000" + pool_addr[2:].lower().zfill(40)
         res  = evm_rpc(chain, "eth_call", [{"to": token_addr, "data": data}, "latest"])
         return int(res[2:66], 16) if res and len(res) >= 66 else 0
@@ -576,16 +449,7 @@ def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DEX Factory ペアアドレス検索（FourMeme/Clanker高速化用）
-# getPair(V2) / getPool(V3) を直接クエリしてペアアドレスを即取得
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _get_v2_pair(token_a, token_b, factory, chain):
-    """
-    PancakeSwap V2 Factory の getPair(tokenA, tokenB) を呼びペアアドレスを返す。
-    ペアが存在しない場合は None。
-    """
     ta   = token_a[2:].lower().zfill(40)
     tb   = token_b[2:].lower().zfill(40)
     data = "0xe6a43905" + "000000000000000000000000" + ta + "000000000000000000000000" + tb
@@ -598,11 +462,6 @@ def _get_v2_pair(token_a, token_b, factory, chain):
 
 
 def _get_v3_pool_addr(token_a, token_b, factory, fee, chain):
-    """
-    Uniswap/PancakeSwap V3 Factory の getPool(tokenA, tokenB, fee) を呼びプールアドレスを返す。
-    プールが存在しない場合は None。
-    fee: 100 / 500 / 2500 / 3000 / 10000
-    """
     ta      = token_a[2:].lower().zfill(40)
     tb      = token_b[2:].lower().zfill(40)
     fee_hex = hex(fee)[2:].zfill(64)
@@ -616,62 +475,38 @@ def _get_v3_pool_addr(token_a, token_b, factory, fee, chain):
 
 
 def _find_pair_address(token_addr, chain):
-    """
-    FourMeme/BSC または Clanker/Base のトークンに対して
-    PancakeSwap V2/V3 または Uniswap V3 でペアアドレスを検索。
-    見つかれば (pair_addr, token0, token1, is_v2) を返す。見つからなければ None。
-
-    BSC: WBNB ペアを V2 → V3(500/2500/10000) の順で試す
-    Base: WETH ペアを V3(500/3000/10000/100) の順で試す
-    """
     ta  = token_addr.lower()
     is_bsc = "BSC" in chain["name"] or "BNB" in chain["name"] or "FourMeme" in chain["name"]
 
     if is_bsc:
-        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"  # WBNB
+        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
         factory_v2 = PANCAKE_V2_FACTORY_BSC
         factory_v3 = PANCAKE_V3_FACTORY_BSC
         v3_fees    = (500, 2500, 10000, 100)
     else:
-        native  = "0x4200000000000000000000000000000000000006"  # WETH (Base)
+        native  = "0x4200000000000000000000000000000000000006"
         factory_v2 = None
         factory_v3 = UNISWAP_V3_FACTORY_BASE
         v3_fees    = (500, 3000, 10000, 100)
 
     nb = native.lower()
-    # token0/token1 は小文字辞書順
     t0, t1 = (ta, nb) if ta < nb else (nb, ta)
 
-    # V2 を先に試す（BSCのみ）
     if factory_v2:
         pair = _get_v2_pair(ta, native, factory_v2, chain)
         if pair:
             return pair, t0, t1, True
 
-    # V3 を fee tier 順に試す
     for fee in v3_fees:
         pool = _get_v3_pool_addr(ta, native, factory_v3, fee, chain)
         if pool:
             return pool, t0, t1, False
 
-    return None  # まだペアが存在しない
+    return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Mint イベント監視（流動性追加を直接検知 → DexScreener不要で5〜10秒通知）
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
                               token0, token1, is_v2):
-    """
-    Pair/Pool の Mint イベントを 3秒ごとにポーリングし、
-    流動性追加を検知した瞬間に getReserves/balanceOf → 即通知。
-
-    DexScreenerを使わないためインデックス遅延（30〜90秒）を完全排除。
-    平均通知時間: 5〜10秒（Pool作成〜流動性追加のタイムラグ次第）。
-
-    タイムアウト10分: 流動性が追加されなければスキップ。
-    """
     mint_topic = V2_MINT_TOPIC if is_v2 else V3_MINT_TOPIC
     deadline          = time.time() + MONITOR_TIMEOUT_SEC
     last_checked_block = from_block
@@ -679,7 +514,7 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
     print(f"[{chain['name']}] Mint監視開始: {pair_addr[:12]} ({token_address[:12]})")
 
     while time.time() < deadline:
-        time.sleep(3)  # 3秒ごとにチェック（10秒→3秒で応答性向上）
+        time.sleep(3)
 
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
@@ -688,7 +523,6 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
         if latest_int <= last_checked_block:
             continue
 
-        # Mint イベントをペアコントラクトアドレス宛に絞って取得
         logs = evm_rpc(chain, "eth_getLogs", [{
             "fromBlock": hex(last_checked_block + 1),
             "toBlock":   hex(latest_int),
@@ -702,7 +536,6 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
 
         print(f"[{chain['name']}] ⚡ Mint検知！即getReserves: {pair_addr[:12]}")
 
-        # Mint検知 → 即オンチェーン流動性取得
         if is_v2:
             liq = _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain)
         else:
@@ -710,11 +543,10 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
 
         if liq is None or liq < LIQUIDITY_MIN:
             print(f"[{chain['name']}] Mint後も流動性不足 ${liq or 0:,.0f} → 監視継続")
-            continue  # まだ少ない（分割追加の可能性）→ 次のMintを待つ
+            continue
 
         print(f"[{chain['name']}] 流動性OK: ${liq:,.0f} → 保有率チェックへ")
 
-        # 流動性OK → holder_stats と DexScreener を並列取得
         holder_result = [None]
         dex_result    = [None]
 
@@ -739,7 +571,6 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
             continue
 
         top10 = holder_data["top10_ratio"]
-        # チェーンごとのtop10_max_pctを優先、なければグローバル値を使用
         top10_limit = chain.get("top10_max_pct", TOP10_MAX_PCT)
         print(f"[{chain['name']}] トップ10保有率: {top10:.1f}% (上限{top10_limit:.0f}%)")
         if top10 > top10_limit:
@@ -771,26 +602,9 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM トークン処理スレッド（閾値ベース: 流動性$10k+ かつ トップ10≤60%）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _process_evm_token(token_address, chain, from_block,
                         pair_addr=None, token0=None, token1=None, is_v2=False):
-    """
-    新規EVMトークンの流動性・保有率チェックと通知。
-
-    pair_addr あり（check_evm_all_chain から）:
-        オンチェーン getReserves()/balanceOf() で即時チェック。
-        万が一 reserve=0 なら 3秒 × 3回 リトライ後スキップ。
-        → 平均通知まで 5〜15秒。
-
-    pair_addr なし（check_evm_chain / FourMeme・Clanker から）:
-        DexScreener を 10秒毎にポーリング（最大10分）。
-        → 平均通知まで 30〜60秒（フォールバック）。
-    """
     try:
-        # ── オンチェーン直接チェック（pair_addr あり）──────────────────────────
         if pair_addr and token0 and token1:
             liq = None
             for attempt in range(3):
@@ -802,14 +616,12 @@ def _process_evm_token(token_address, chain, from_block,
                 if liq is not None and liq > 0:
                     break
                 if attempt < 2:
-                    time.sleep(1)   # 旧3秒→1秒（リトライ合計最大2秒に短縮）
+                    time.sleep(1)
                     print(f"[{chain['name']}] 流動性リトライ {attempt+2}/3: {pair_addr[:12]}")
 
             liq_str = f"${liq:,.0f}" if liq else "$0"
             print(f"[{chain['name']}] オンチェーン流動性: {liq_str} ({token_address[:12]})")
 
-            # liq=0 または LIQUIDITY_MIN未満 → Mint イベント監視へ（DexScreener不要）
-            # 流動性追加TXを直接検知するため 30〜90秒の遅延を排除し 5〜10秒で通知
             if liq is None or liq < LIQUIDITY_MIN:
                 print(f"[{chain['name']}] オンチェーン流動性不足(${liq or 0:,.0f})"
                       f" → Mint監視へ: {token_address[:12]}")
@@ -817,10 +629,9 @@ def _process_evm_token(token_address, chain, from_block,
                     pair_addr, token_address, chain, from_block,
                     token0, token1, is_v2,
                 )
-                return  # Mint監視内で通知まで完結
+                return
 
             else:
-                # 流動性OK → holder_stats と DexScreener を並列取得（直列→並列で数秒短縮）
                 holder_result = [None]
                 dex_result    = [None]
 
@@ -841,7 +652,6 @@ def _process_evm_token(token_address, chain, from_block,
                 dex         = dex_result[0]
 
                 if holder_data is None:
-                    # 保有データ取得失敗でもスキップせず流動性のみで通知（見逃し防止）
                     print(f"[{chain['name']}] 保有データ取得失敗 → 流動性のみで通知")
                     liq_display = dex["liquidity"] if dex else liq
                     dex_extra   = (
@@ -892,9 +702,6 @@ def _process_evm_token(token_address, chain, from_block,
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
                 return
 
-        # ── フォールバック: Factory直接クエリ → Mint監視（pair_addr なし）────────
-        # FourMeme/Clanker用: getPair/getPoolを3秒ごとにポーリングしてペアを発見
-        # ペア発見後は即 _wait_for_liquidity_mint へ渡す（DexScreener不要）
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
 
@@ -907,9 +714,9 @@ def _process_evm_token(token_address, chain, from_block,
                     f_pair, token_address, chain, from_block,
                     f_t0, f_t1, f_is_v2,
                 )
-                return  # Mint監視内で通知まで完結
+                return
 
-            time.sleep(3)  # 3秒ごとにペア検索
+            time.sleep(3)
 
         print(f"[{chain['name']}] タイムアウト → スキップ: {token_address[:16]}")
 
@@ -917,28 +724,18 @@ def _process_evm_token(token_address, chain, from_block,
         print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM チェーン監視（メインループから呼ばれる・即リターン）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def check_evm_chain(chain):
-    """
-    新規トークンを検知したらすぐ別スレッドへ渡してリターン。
-    待機処理は一切ここではやらない。
-    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
 
-        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
 
-        # FIX: from_block = last_block+1（-20キャップ削除でブロック漏れ防止）
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
@@ -970,7 +767,6 @@ def check_evm_chain(chain):
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
 
-            # ★ 別スレッドに渡してすぐリターン → メインループは止まらない
             t = threading.Thread(
                 target=_process_evm_token,
                 args=(token_address, chain, latest_int),
@@ -982,26 +778,13 @@ def check_evm_chain(chain):
         print(f"[{chain['name']}] チェックエラー: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM 全般監視 (PancakeSwap V3 / Uniswap V3 PoolCreated)
-# FourMeme/Clanker以外の全launchpadトークンを対象とする
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-
 def check_evm_all_chain(chain):
-    """
-    DEX Factory の PoolCreated イベントを監視し、新規トークンを検知する。
-    token0/token1 のうちベーストークン（WBNB/WETH/USDC等）でない方を新規トークンとして処理。
-    known_tokens を FourMeme/Clanker と共有することで二重通知を防止。
-    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
 
-        # 初回: 現在ブロックを記録して終了
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
@@ -1014,7 +797,6 @@ def check_evm_all_chain(chain):
         if from_block > latest_int:
             return
 
-        # V2(PairCreated) / V3(PoolCreated) でトピックが異なるため chain["topic"] を使用
         event_topic = chain.get("topic", POOL_CREATED_TOPIC)
         logs = evm_rpc(chain, "eth_getLogs", [{
             "fromBlock": hex(from_block),
@@ -1037,11 +819,9 @@ def check_evm_all_chain(chain):
             topics = log.get("topics", [])
             if len(topics) < 3:
                 continue
-            # topics[1]=token0, topics[2]=token1 (32バイト値、下位20バイト=アドレス)
             token0 = ("0x" + topics[1][-40:]).lower()
             token1 = ("0x" + topics[2][-40:]).lower()
 
-            # ベーストークンでない方が「新規トークン」
             t0_is_base = token0 in base_tokens
             t1_is_base = token1 in base_tokens
             if not t0_is_base and t1_is_base:
@@ -1049,23 +829,18 @@ def check_evm_all_chain(chain):
             elif t0_is_base and not t1_is_base:
                 new_token = token1
             else:
-                continue  # 両方ベース or 両方非ベース → スキップ
+                continue
 
             if new_token in chain["known_tokens"]:
                 continue
 
-            # ── ログデータからpair/poolアドレスを抽出 ────────────────────────
-            # V2 PairCreated data: pair_addr(32B) + uint(32B)
-            #   pair = data[2+24 : 2+64]  (先頭32Bの下位20B)
-            # V3 PoolCreated data: tickSpacing(32B) + pool_addr(32B)
-            #   pool = data[2+64+24 : 2+64+64]  (2番目32Bの下位20B)
             raw_data  = log.get("data", "0x")
             pair_addr = None
             try:
                 if is_v2 and len(raw_data) >= 66:
-                    pair_addr = "0x" + raw_data[26:66]    # V2: 先頭32Bの下位20B
+                    pair_addr = "0x" + raw_data[26:66]
                 elif not is_v2 and len(raw_data) >= 130:
-                    pair_addr = "0x" + raw_data[90:130]   # V3: 2番目32Bの下位20B
+                    pair_addr = "0x" + raw_data[90:130]
             except Exception:
                 pair_addr = None
 
@@ -1086,12 +861,8 @@ def check_evm_all_chain(chain):
         print(f"[{chain['name']}] チェックエラー: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SOLANA RPC
-# ══════════════════════════════════════════════════════════════════════════════
-
 def solana_rpc(method, params):
-    _wait_for_rpc_slot()  # グローバル8 RPSレート制限
+    _wait_for_rpc_slot()
     for attempt in range(4):
         try:
             r = requests.post(SOLANA_RPC, json={
@@ -1101,11 +872,10 @@ def solana_rpc(method, params):
             if r.status_code == 200:
                 return r.json().get("result")
             if r.status_code == 429:
-                # レート制限: 指数バックオフで待機
-                wait = 2 ** attempt  # 1秒 → 2秒 → 4秒 → 8秒
+                wait = 2 ** attempt
                 print(f"[Solana RPC] 429 レート制限 → {wait}秒待機 (attempt {attempt+1}/4)")
                 time.sleep(wait)
-                _wait_for_rpc_slot()  # リトライ前にも全スレッド共通の制限を通す
+                _wait_for_rpc_slot()
                 continue
             print(f"[Solana RPC] HTTPエラー {r.status_code}: {r.text[:100]}")
         except Exception as e:
@@ -1116,22 +886,17 @@ def solana_rpc(method, params):
 
 
 def get_new_pumpfun_transactions():
-    """
-    last_signature以降の全新規TXをページネーションで取得。
-    - 通常時（last_signatureあり）: until指定で新規TXを全件取得
-    - 初回/初期化失敗時（last_signatureなし）: 最新50件のみ取得（遡り暴走防止）
-    """
     global last_signature
     all_txns  = []
     before    = None
-    is_catchup = (last_signature is None)  # 初回または初期化失敗フラグ
+    is_catchup = (last_signature is None)
 
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
         if last_signature:
-            opts["until"] = last_signature  # これ以降（新しい側）を取得
+            opts["until"] = last_signature
         if before:
-            opts["before"] = before         # ページネーション用
+            opts["before"] = before
 
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
@@ -1140,22 +905,18 @@ def get_new_pumpfun_transactions():
         all_txns.extend(result)
 
         if len(result) < 50:
-            break  # 50件未満 = 全件取得完了
+            break
 
-        # 初回/初期化失敗時は最新50件だけで打ち切り（5000件遡り暴走防止）
         if is_catchup:
             print(f"[Pump.fun] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
 
-        # ページネーション上限: 50件で打ち切り
-        # 200件→50件に削減: 10秒ポーリングで50件÷8スレッド≒9秒で処理完了し遅延蓄積を防ぐ
         if len(all_txns) >= 50:
             print(f"[Pump.fun] ページネーション上限50件 → 打ち切り")
             break
 
-        # 次ページ: 現在バッチの最古TXの前から取得
         before = result[-1].get("signature")
-        time.sleep(0.1)  # ページネーション間のウェイト
+        time.sleep(0.1)
 
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
@@ -1166,13 +927,12 @@ def get_new_pumpfun_transactions():
 
 
 def parse_new_token(signature):
-    # Solanaシステムアドレスは新規トークンとして扱わない
     IGNORED_MINTS = {
-        "So11111111111111111111111111111111111111112",  # Wrapped SOL (wSOL)
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
-        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",  # mSOL
-        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", # stSOL
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
     }
 
     result = None
@@ -1187,8 +947,6 @@ def parse_new_token(signature):
         print(f"[Solana] getTransaction返答なし (attempt {attempt+1}/3): {signature[:20]}")
         time.sleep(0.5)
     if not result:
-        # False = getTransaction完全失敗（リトライ対象）
-        # None  = TX取得成功だが新規mintなし（リトライ不要）
         return False
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
     pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
@@ -1202,11 +960,6 @@ def parse_new_token(signature):
 
 
 def parse_new_fungible_mint(signature):
-    """
-    任意のSolana TXから新規ファンジブルトークンのmintを抽出。
-    NFT(decimals=0)は除外し、ファンジブルトークン(decimals>=1)のみ返す。
-    戻り値: False=getTransaction失敗 / None=対象mintなし / mint文字列
-    """
     IGNORED_MINTS = {
         "So11111111111111111111111111111111111111112",
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -1226,7 +979,7 @@ def parse_new_fungible_mint(signature):
             break
         time.sleep(0.5)
     if not result:
-        return False  # getTransaction完全失敗
+        return False
 
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
     pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
@@ -1238,21 +991,13 @@ def parse_new_fungible_mint(signature):
         if not mint or mint in pre_mints or mint in IGNORED_MINTS:
             continue
         if decimals == 0:
-            continue  # NFTをスキップ（NFTはdecimals=0）
+            continue
         print(f"[Solana全般] 新規ファンジブルmint: {mint[:20]} (decimals={decimals})")
         return mint
-    return None  # mintなし（メタデータ更新TXなど）
-
-
-
-
+    return None
 
 
 def get_solana_holder_stats(mint):
-    """
-    getTokenLargestAccounts + getTokenSupply で実際の保有量トップ10データを取得。
-    戻り値: {"top10_ratio": float, "top10_detail": [str, ...]} / 失敗時は None。
-    """
     try:
         supply_result = solana_rpc("getTokenSupply", [mint])
         if not supply_result:
@@ -1285,13 +1030,7 @@ def get_solana_holder_stats(mint):
         return None
 
 
-
-
 def format_holder_output(holder_data):
-    """
-    実際の保有量トップ10データから通知用テキストを生成。
-    Solana確定通知のウォレット分析欄に使用。
-    """
     if not holder_data:
         return "👛 保有者データ取得中...\n", ""
     top10_lines = "\n".join(holder_data["top10_detail"])
@@ -1311,11 +1050,6 @@ def format_holder_output(holder_data):
 
 
 def get_evm_holder_stats(token_address, chain, from_block):
-    """
-    EVM Transfer eventからトークン保有量を計算し、トップ10保有者データを返す。
-    get_solana_holder_stats と同構造 → format_holder_output で共用可能。
-    戻り値: {"top10_ratio": float, "top10_detail": [str, ...]} / 失敗時は None
-    """
     try:
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
@@ -1331,7 +1065,6 @@ def get_evm_holder_stats(token_address, chain, from_block):
         if not logs:
             return None
 
-        # Transfer eventからバランスマップを構築
         balances  = {}
         ZERO_ADDR = "0x" + "0" * 40
         for log in logs:
@@ -1352,7 +1085,6 @@ def get_evm_holder_stats(token_address, chain, from_block):
             if to_addr != ZERO_ADDR:
                 balances[to_addr]   = balances.get(to_addr, 0)   + amount
 
-        # 正の残高のみ抽出
         positive = {addr: bal for addr, bal in balances.items() if bal > 0}
         if not positive:
             return None
@@ -1382,39 +1114,21 @@ def get_evm_holder_stats(token_address, chain, from_block):
         return None
 
 
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana トークン処理スレッド（閾値ベース: 流動性$50k+ かつ トップ10≤60%）
-# pump.fun / Solana全般 共通
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _process_solana_token(mint, label="Pump.fun", pump_link=True):
-    """
-    新規Solanaトークンを監視し、流動性$50k+ かつ トップ10保有率≤60% で即通知。
-    pump.funトークン（pump_link=True）:
-        pump.fun独自APIを優先使用（インデックス遅延なし → 5〜15秒）。
-        API失敗・卒業済みはDexScreenerにフォールバック。
-    Solana全般（pump_link=False）:
-        まずpump.fun APIを1回試行し、使えればfast path（高速化 → 15〜45秒）。
-        使えない場合はDexScreenerを3秒毎にポーリング（タイムアウト5分）。
-    """
     try:
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{label}] 閾値監視開始: {mint[:20]}"
               f" (流動性${LIQUIDITY_MIN:,}+, トップ10≤{TOP10_MAX_PCT}%)")
 
-        # pump_link=False でも pump.fun API が使えるかチェック（Solana全般高速化）
         effective_pump = pump_link
         if not pump_link:
             pf_probe = analyze_pumpfun_api(mint)
             if pf_probe:
-                effective_pump = True  # pump.fun APIが使えるのでfast pathへ
+                effective_pump = True
                 print(f"[{label}] pump.fun API使用可 → fast path切替")
 
         while time.time() < deadline:
 
-            # ── pump.fun独自API優先（pump.funトークン or Solana全般でAPI使用可）──
             if effective_pump:
                 pf = analyze_pumpfun_api(mint)
                 if pf:
@@ -1433,7 +1147,6 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                             print(f"[{label}] ❌ 保有集中高すぎ → スキップ")
                             return
 
-                        # DexScreenerでも補足データ取得（なくても通知する）
                         dex = analyze_dexscreener(mint)
                         platform = _get_platform_name(dex) if dex else "pump.fun"
                         dex_text = _build_dex_text(dex) if dex else (
@@ -1463,7 +1176,6 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                 # pump.fun API失敗 → 以降DexScreener一本化（530連打を防ぐ）
                 effective_pump = False
 
-            # ── DexScreenerポーリング（Solana全般 / pump.fun APIフォールバック）──
             dex = analyze_dexscreener(mint)
             if not dex:
                 time.sleep(POLL_INTERVAL_SEC)
@@ -1515,13 +1227,7 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun 監視（メインループから呼ばれる・即リターン）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _handle_pumpfun_sig(sig):
-    """Pump.fun シグネチャを並列処理するワーカー関数"""
-    # セマフォで同時getTransaction数を8に制限し429を根絶
     with _SOLANA_SEMAPHORE:
         mint = parse_new_token(sig)
     if mint is False:
@@ -1541,15 +1247,11 @@ def _handle_pumpfun_sig(sig):
 
 
 def check_pumpfun_onchain():
-    """
-    新規mintを並列で一気に処理。_wait_for_rpc_slot()でRPS制限管理。
-    """
     global known_token_mints
     txns = get_new_pumpfun_transactions()
     if not txns:
         return
 
-    # ── 古いTX除外（5分超はボンカーブ通知ウィンドウ外）────────────────────────
     now = time.time()
     before_filter = len(txns)
     txns = [tx for tx in txns
@@ -1558,8 +1260,6 @@ def check_pumpfun_onchain():
         print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ"
               f"（残り{len(txns)}件）")
 
-    # ── 並列処理（全件を同時にスレッド起動）────────────────────────────────────
-    # _wait_for_rpc_slot()がグローバル8RPSを管理するため429は発生しない
     sigs = [tx.get("signature", "") for tx in txns
             if tx.get("signature") and not tx.get("err")]
     if not sigs:
@@ -1569,23 +1269,13 @@ def check_pumpfun_onchain():
         _PUMPFUN_POOL.submit(_handle_pumpfun_sig, sig)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun リトライキュー処理（検知漏れ防止）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def process_retry_queue():
-    """
-    getTransactionが失敗したシグネチャを再試行。
-    成功すれば通常通りスレッドを起動する。
-    RETRY_EXPIRY秒以上経過したものは破棄。
-    """
     global known_token_mints
     now = time.time()
 
     with RETRY_SIG_LOCK:
         if not RETRY_SIG_QUEUE:
             return
-        # 有効期限内のものだけ取り出す
         valid   = [(s, t) for s, t in RETRY_SIG_QUEUE if now - t <= RETRY_EXPIRY]
         expired = len(RETRY_SIG_QUEUE) - len(valid)
         RETRY_SIG_QUEUE.clear()
@@ -1598,11 +1288,10 @@ def process_retry_queue():
     print(f"[Pump.fun] リトライ処理: {len(valid)}件")
     still_failed = []
     for sig, enqueued_at in valid:
-        time.sleep(1.0)  # リトライは長めに待つ（429対策）
+        time.sleep(1.0)
         mint = parse_new_token(sig)
 
         if mint is False:
-            # まだ失敗 → 有効期限内なら再キュー
             if time.time() - enqueued_at <= RETRY_EXPIRY:
                 still_failed.append((sig, enqueued_at))
             continue
@@ -1627,16 +1316,7 @@ def process_retry_queue():
         print(f"[Pump.fun] リトライ再キュー: {len(still_failed)}件")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana 全般監視 (Token Metadata Program) ─ 独立バックグラウンドスレッドで動作
-# pump.fun 以外の全launchpad (rapidlaunch.io / moonshot / letsbonk 等) を対象とする
-# ══════════════════════════════════════════════════════════════════════════════
-
 def get_new_metadata_transactions():
-    """
-    SPL Token Metadata Program の新規TXを取得。
-    all_solana_last_signature 以降の新規TXのみ返す。
-    """
     global all_solana_last_signature
     all_txns = []
     before   = None
@@ -1662,7 +1342,6 @@ def get_new_metadata_transactions():
             print(f"[Solana全般] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
 
-        # ページネーション上限: 200件
         if len(all_txns) >= 200:
             print("[Solana全般] ページネーション上限200件 → 打ち切り")
             break
@@ -1678,10 +1357,7 @@ def get_new_metadata_transactions():
     return all_txns
 
 
-
-
 def _get_platform_name(dex):
-    """DexScreener の dex_id から launchpad名を返す"""
     if not dex:
         return "Unknown"
     dex_id = dex.get("dex_id", "").lower()
@@ -1703,7 +1379,6 @@ def _get_platform_name(dex):
 
 
 def _build_dex_text(dex):
-    """DexScreener データからテキストを生成"""
     if not dex:
         return "📊 価格データ取得中...\n\n"
     return (
@@ -1714,8 +1389,6 @@ def _build_dex_text(dex):
 
 
 def _handle_metadata_sig(sig):
-    """Solana全般 シグネチャを並列処理するワーカー関数"""
-    # セマフォで同時getTransaction数を8に制限し429を根絶
     with _SOLANA_SEMAPHORE:
         mint = parse_new_fungible_mint(sig)
     if mint is False or not mint:
@@ -1734,16 +1407,11 @@ def _handle_metadata_sig(sig):
 
 
 def check_all_solana_onchain():
-    """
-    Token Metadata Program の新規TXを並列で一気に処理。
-    pump.fun で既に検知済みのトークンはスキップ（二重通知防止）。
-    """
     global known_token_mints
     txns = get_new_metadata_transactions()
     if not txns:
         return
 
-    # 古いTX除外（5分超は通知ウィンドウ外）
     now = time.time()
     before_filter = len(txns)
     txns = [tx for tx in txns
@@ -1752,7 +1420,6 @@ def check_all_solana_onchain():
         print(f"[Solana全般] 古いTX除外: {before_filter - len(txns)}件スキップ"
               f"（残り{len(txns)}件）")
 
-    # ── 並列処理（全件を同時にスレッド起動）────────────────────────────────────
     sigs = [tx.get("signature", "") for tx in txns
             if tx.get("signature") and not tx.get("err")]
     if not sigs:
@@ -1763,14 +1430,9 @@ def check_all_solana_onchain():
 
 
 def pumpfun_monitor_loop():
-    """
-    Pump.fun監視の独立ループ。メインループと並行して動作。
-    10秒ごとにポーリング。TX上限なしで全件処理するため見逃しなし。
-    """
     global last_signature
     print("[Pump.fun] 監視ループ開始中...")
 
-    # 初期化: 起動時点の最新sigを記録し、過去mintを無視
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
         last_signature = init_sigs[0].get("signature", "")
@@ -1784,18 +1446,13 @@ def pumpfun_monitor_loop():
             process_retry_queue()
         except Exception as e:
             print(f"[Pump.fun] ループエラー: {e}")
-        time.sleep(10)  # 10秒ごと（TXが溜まらないよう短くする）
+        time.sleep(10)
 
 
 def solana_all_monitor_loop():
-    """
-    Solana全般監視の独立ループ。メインループと並行して動作。
-    60秒ごとに Token Metadata Program をポーリング。
-    """
     global all_solana_last_signature
     print("[Solana全般] 監視ループ開始中...")
 
-    # 初期化: 現時点の最新sigを記録し過去TXを無視
     init_sigs = solana_rpc("getSignaturesForAddress",
                            [SPL_METADATA_PROGRAM, {"limit": 5}])
     if init_sigs:
@@ -1809,21 +1466,10 @@ def solana_all_monitor_loop():
             check_all_solana_onchain()
         except Exception as e:
             print(f"[Solana全般] ループエラー: {e}")
-        time.sleep(15)  # 60→15秒（検知速度改善）
+        time.sleep(15)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Raydium直接監視（プール作成TXを直接検知 → DexScreener不要で5〜15秒通知）
-# AMM V4 / CPMM の getSignaturesForAddress でポーリング
-# postTokenBalances の新規mint + WSOL/USDC残高からUSD流動性を即計算
-# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_raydium_new_pool(signature):
-    """
-    Raydium TX を解析し、新規プール作成なら (mint, liq_usd) を返す。
-    スワップTX（既存mintのみ）は None を返してスキップ。
-    getTransaction失敗時は False を返す（リトライ対象）。
-    """
     result = None
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
@@ -1835,14 +1481,13 @@ def parse_raydium_new_pool(signature):
             break
         time.sleep(0.5)
     if not result:
-        return False  # getTransaction完全失敗
+        return False
 
     meta          = result.get("meta", {}) or {}
     post_balances = meta.get("postTokenBalances", []) or []
     pre_balances  = meta.get("preTokenBalances",  []) or []
     pre_mints     = {b.get("mint") for b in pre_balances}
 
-    # 新規mint検出: postにあってpreにない、かつベーストークン以外
     new_mint = None
     for b in post_balances:
         mint = b.get("mint", "")
@@ -1854,9 +1499,8 @@ def parse_raydium_new_pool(signature):
         break
 
     if not new_mint:
-        return None  # スワップTX → スキップ
+        return None
 
-    # USD流動性を postTokenBalances の WSOL/USDC 残高から計算
     liq_usd = 0.0
     for b in post_balances:
         mint     = b.get("mint", "")
@@ -1874,11 +1518,6 @@ def parse_raydium_new_pool(signature):
 
 
 def _process_raydium_token(mint, liq_usd):
-    """
-    Raydium新規プールのトークンを通知。
-    liq_usd >= LIQUIDITY_MIN なら即保有率チェック → 通知。
-    未達なら DexScreener ポーリングにフォールバック。
-    """
     try:
         if liq_usd >= LIQUIDITY_MIN:
             print(f"[Raydium] 流動性OK ${liq_usd:,.0f} → 保有率チェック: {mint[:20]}")
@@ -1895,7 +1534,6 @@ def _process_raydium_token(mint, liq_usd):
                 return
 
             dex = analyze_dexscreener(mint)
-            platform = "Raydium"
             dex_text = _build_dex_text(dex) if dex else f"💧 流動性: ${liq_usd:,.0f}\n\n"
             holder_text, holder_judge = format_holder_output(holder_data)
             msg = (
@@ -1912,7 +1550,6 @@ def _process_raydium_token(mint, liq_usd):
             send_telegram(msg)
             print(f"[Raydium] ✅ 即通知完了: {mint[:20]}")
         else:
-            # 流動性不足 → DexScreener ポーリング（タイムアウト5分）
             print(f"[Raydium] 流動性不足 ${liq_usd:,.0f} → DexScreener監視: {mint[:20]}")
             _process_solana_token(mint, "Raydium", False)
 
@@ -1921,12 +1558,10 @@ def _process_raydium_token(mint, liq_usd):
 
 
 def _handle_raydium_tx(sig):
-    """Raydium シグネチャを処理するワーカー関数"""
-    # セマフォで同時getTransaction数を8に制限し429を根絶
     with _SOLANA_SEMAPHORE:
         parsed = parse_raydium_new_pool(sig)
     if parsed is False or parsed is None:
-        return  # getTransaction失敗 or スワップTX
+        return
     mint, liq_usd = parsed
     with KNOWN_MINTS_LOCK:
         if mint in known_token_mints:
@@ -1942,10 +1577,6 @@ def _handle_raydium_tx(sig):
 
 
 def check_raydium_onchain():
-    """
-    Raydium AMM V4 / CPMM の新規TXを並列で処理。
-    getSignaturesForAddress で raydium_last_sigs 以降を取得。
-    """
     global raydium_last_sigs
     now = time.time()
 
@@ -1959,10 +1590,8 @@ def check_raydium_onchain():
         if not txns:
             continue
 
-        # 最新シグを更新
         raydium_last_sigs[program] = txns[0].get("signature", "")
 
-        # 古いTX除外（5分超）
         txns = [tx for tx in txns
                 if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
         if not txns:
@@ -1979,15 +1608,9 @@ def check_raydium_onchain():
 
 
 def raydium_monitor_loop():
-    """
-    Raydium直接監視の独立ループ。10秒ごとにポーリング。
-    AMM V4: 流動性追加～通知まで 5〜15秒
-    CPMM  : 流動性追加～通知まで 5〜15秒
-    """
     global raydium_last_sigs
     print("[Raydium] 監視ループ開始中...")
 
-    # 初期化: 現時点の最新sigを記録し過去TXを無視
     for program in (RAYDIUM_AMM_V4, RAYDIUM_CPMM):
         label = "AMM_V4" if program == RAYDIUM_AMM_V4 else "CPMM"
         init  = solana_rpc("getSignaturesForAddress", [program, {"limit": 5}])
@@ -2002,12 +1625,8 @@ def raydium_monitor_loop():
             check_raydium_onchain()
         except Exception as e:
             print(f"[Raydium] ループエラー: {e}")
-        time.sleep(5)  # 5秒ごと（高速化）
+        time.sleep(5)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CEX (Bitget) 監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def get_cex_symbols():
     try:
@@ -2025,11 +1644,6 @@ def get_cex_symbols():
 
 
 def get_bitget_contract_addresses(coin):
-    """
-    Bitget コイン情報APIからチェーン別コントラクトアドレスを取得。
-    戻り値例: {"BSC": "0xabc...", "Solana": "mint...", "Ethereum": "0x..."}
-    アドレスなし or API失敗時は {}。
-    """
     try:
         url = f"https://api.bitget.com/api/v2/spot/public/coins?coin={coin}"
         r = requests.get(url, headers=HEADERS, timeout=8)
@@ -2064,10 +1678,8 @@ def check_cex_listings():
         if symbol.endswith("USDT"):
             base = symbol.replace("USDT", "")
 
-            # チェーン別コントラクトアドレスを取得
             addresses = get_bitget_contract_addresses(base)
 
-            # アドレス表示テキストを生成（最大5チェーン）
             addr_text = ""
             if addresses:
                 lines = []
@@ -2087,10 +1699,6 @@ def check_cex_listings():
             print(f"[CEX新規] {symbol} アドレス={len(addresses)}チェーン")
     known_cex_symbols = current
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# メインループ
-# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     print("通知ボットくん 起動中...")
@@ -2114,43 +1722,37 @@ def main():
         "moonshot / letsbonk / その他全Solana launchpad"
     )
 
-    # Pump.fun監視を独立バックグラウンドスレッドで起動（TX上限なし・10秒ごと）
     t_pumpfun = threading.Thread(target=pumpfun_monitor_loop, daemon=True)
     t_pumpfun.start()
     print("[Pump.fun] バックグラウンドスレッド起動完了")
 
-    # Solana全般監視を独立バックグラウンドスレッドで起動
     t_all_solana = threading.Thread(target=solana_all_monitor_loop, daemon=True)
     t_all_solana.start()
     print("[Solana全般] バックグラウンドスレッド起動完了")
 
-    # Raydium直接監視を独立バックグラウンドスレッドで起動（AMM V4 + CPMM）
     t_raydium = threading.Thread(target=raydium_monitor_loop, daemon=True)
     t_raydium.start()
     print("[Raydium] バックグラウンドスレッド起動完了")
 
     loop = 0
     while True:
-        # ── メインループはEVM監視のみ ──
-        # CEXは30秒毎（6ループ × 5秒）、EVM検知は5秒毎で高速化
         if loop % 6 == 0:
             check_cex_listings()
         for chain in EVM_CHAINS:
             check_evm_chain(chain)
         for chain in EVM_ALL_CHAINS:
-            check_evm_all_chain(chain)  # PairCreated/PoolCreated → オンチェーン即時チェック
+            check_evm_all_chain(chain)
 
-        time.sleep(5)  # 30→5秒（EVM新規プール検知を高速化）
+        time.sleep(5)
         loop += 1
-        if loop % 360 == 0:  # 360 × 5秒 = 30分ごとにステータス表示
+        if loop % 360 == 0:
             evm_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
             )
             all_status = " ".join(
                 f"{c['name']}={len(c['known_tokens'])}" for c in EVM_ALL_CHAINS
             )
-            # 稼働中のスレッド数も表示
-            active_threads = threading.active_count() - 1  # メインスレッド除く
+            active_threads = threading.active_count() - 1
             print(
                 f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
                 f"CEX={len(known_cex_symbols)} "
