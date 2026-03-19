@@ -198,7 +198,7 @@ MONITOR_TIMEOUT_SEC = 300
 
 KNOWN_MINTS_LOCK = threading.Lock()
 
-_SOLANA_SEMAPHORE = threading.Semaphore(6)
+_SOLANA_SEMAPHORE  = threading.Semaphore(6)
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
 
 _PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
@@ -246,11 +246,9 @@ def _get_sol_price_usd():
     if _sol_price_cache[0] and now - _sol_price_cache[1] < PRICE_CACHE_SEC:
         return _sol_price_cache[0]
     try:
-        url = f"https://price.jup.ag/v6/price?ids=SOL"
-        r = requests.get(url, headers=HEADERS, timeout=8)
+        r = requests.get("https://price.jup.ag/v6/price?ids=SOL", headers=HEADERS, timeout=8)
         if r.status_code == 200:
-            data = r.json()
-            price = float(data.get("data", {}).get("SOL", {}).get("price", 0))
+            price = float(r.json().get("data", {}).get("SOL", {}).get("price", 0))
             if price > 0:
                 _sol_price_cache[0] = price
                 _sol_price_cache[1] = now
@@ -312,14 +310,11 @@ def analyze_dexscreener(token_address):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PUMP.FUN 独自API（DexScreenerより高速・インデックス遅延なし）
+# PUMP.FUN 独自API
 # ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_pumpfun_api(mint):
-    """
-    pump.fun 独自APIでトークンデータを取得。
-    Cloudflare(530)対策: pump.fun同一オリジンに見せるブラウザ偽装ヘッダーを使用。
-    """
+    """Cloudflare(530)対策: pump.fun同一オリジンに見せるブラウザ偽装ヘッダーを使用。"""
     _pf_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
@@ -344,15 +339,11 @@ def analyze_pumpfun_api(mint):
         if not data:
             print(f"[Pump.fun API] 空レスポンス ({mint[:16]})")
             return None
-        usd_market_cap = float(data.get("usd_market_cap") or 0)
-        complete       = bool(data.get("complete", False))
-        name           = data.get("name", "")
-        symbol         = data.get("symbol", "")
         return {
-            "liquidity": usd_market_cap,
-            "complete":  complete,
-            "name":      name,
-            "symbol":    symbol,
+            "liquidity": float(data.get("usd_market_cap") or 0),
+            "complete":  bool(data.get("complete", False)),
+            "name":      data.get("name", ""),
+            "symbol":    data.get("symbol", ""),
         }
     except Exception as e:
         print(f"[Pump.fun API] エラー: {e}")
@@ -375,8 +366,7 @@ def evm_rpc(chain, method, params):
                 if r.status_code == 200:
                     data = r.json()
                     if "error" in data:
-                        err = data["error"]
-                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {err}")
+                        print(f"[{chain['name']}] RPC Error ({rpc_url.split('/')[2]}): {data['error']}")
                         break
                     return data.get("result")
                 print(f"[{chain['name']}] HTTP {r.status_code} ({rpc_url.split('/')[2]}) → 次のRPCへ")
@@ -389,7 +379,7 @@ def evm_rpc(chain, method, params):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# オンチェーン流動性チェック（getReserves / balanceOf / Chainlink）
+# オンチェーン流動性チェック
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _get_native_price_usd(chain):
@@ -399,16 +389,13 @@ def _get_native_price_usd(chain):
     cached = _native_price_cache.get(chain_name)
     if cached and now - cached[1] < PRICE_CACHE_SEC:
         return cached[0]
-
     feed = CHAINLINK_BNB_USD if "BSC" in chain_name or "BNB" in chain_name else CHAINLINK_ETH_USD
     result = evm_rpc(chain, "eth_call", [{"to": feed, "data": "0xfeaf968c"}, "latest"])
     if result and len(result) >= 130:
-        answer = int(result[66:130], 16)
-        price  = answer / 1e8
+        price = int(result[66:130], 16) / 1e8
         _native_price_cache[chain_name] = (price, now)
         print(f"[{chain_name}] ネイティブ価格更新: ${price:,.0f}")
         return price
-
     return cached[0] if cached else None
 
 
@@ -417,18 +404,14 @@ def _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain):
         r = evm_rpc(chain, "eth_call", [{"to": pair_addr, "data": "0x0902f1ac"}, "latest"])
         if not r or len(r) < 130:
             return None
-        d        = r[2:]
-        reserve0 = int(d[0:64],  16)
+        d = r[2:]
+        reserve0 = int(d[0:64], 16)
         reserve1 = int(d[64:128], 16)
         if reserve0 == 0 and reserve1 == 0:
             return None
-
         t0, t1 = token0.lower(), token1.lower()
-
-        if t1 in STABLE_ADDRS:
-            return reserve1 / (10 ** STABLE_DECIMALS[t1])
-        if t0 in STABLE_ADDRS:
-            return reserve0 / (10 ** STABLE_DECIMALS[t0])
+        if t1 in STABLE_ADDRS: return reserve1 / (10 ** STABLE_DECIMALS[t1])
+        if t0 in STABLE_ADDRS: return reserve0 / (10 ** STABLE_DECIMALS[t0])
         if t1 in NATIVE_ADDRS:
             p = _get_native_price_usd(chain)
             return (reserve1 / 1e18) * p if p else None
@@ -436,7 +419,6 @@ def _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain):
             p = _get_native_price_usd(chain)
             return (reserve0 / 1e18) * p if p else None
         return None
-
     except Exception as e:
         print(f"[{chain['name']}] getReserves エラー: {e}")
         return None
@@ -447,26 +429,17 @@ def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
         data = "0x70a08231" + "000000000000000000000000" + pool_addr[2:].lower().zfill(40)
         res  = evm_rpc(chain, "eth_call", [{"to": token_addr, "data": data}, "latest"])
         return int(res[2:66], 16) if res and len(res) >= 66 else 0
-
     try:
         t0, t1 = token0.lower(), token1.lower()
-
-        if t1 in STABLE_ADDRS:
-            bal = _balance_of(t1)
-            return bal / (10 ** STABLE_DECIMALS[t1])
-        if t0 in STABLE_ADDRS:
-            bal = _balance_of(t0)
-            return bal / (10 ** STABLE_DECIMALS[t0])
+        if t1 in STABLE_ADDRS: return _balance_of(t1) / (10 ** STABLE_DECIMALS[t1])
+        if t0 in STABLE_ADDRS: return _balance_of(t0) / (10 ** STABLE_DECIMALS[t0])
         if t1 in NATIVE_ADDRS:
-            bal = _balance_of(t1)
-            p   = _get_native_price_usd(chain)
-            return (bal / 1e18) * p if p else None
+            p = _get_native_price_usd(chain)
+            return (_balance_of(t1) / 1e18) * p if p else None
         if t0 in NATIVE_ADDRS:
-            bal = _balance_of(t0)
-            p   = _get_native_price_usd(chain)
-            return (bal / 1e18) * p if p else None
+            p = _get_native_price_usd(chain)
+            return (_balance_of(t0) / 1e18) * p if p else None
         return None
-
     except Exception as e:
         print(f"[{chain['name']}] V3 balanceOf エラー: {e}")
         return None
@@ -502,33 +475,28 @@ def _get_v3_pool_addr(token_a, token_b, factory, fee, chain):
 
 
 def _find_pair_address(token_addr, chain):
-    ta  = token_addr.lower()
+    ta     = token_addr.lower()
     is_bsc = "BSC" in chain["name"] or "BNB" in chain["name"] or "FourMeme" in chain["name"]
-
     if is_bsc:
-        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+        native     = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
         factory_v2 = PANCAKE_V2_FACTORY_BSC
         factory_v3 = PANCAKE_V3_FACTORY_BSC
         v3_fees    = (500, 2500, 10000, 100)
     else:
-        native  = "0x4200000000000000000000000000000000000006"
+        native     = "0x4200000000000000000000000000000000000006"
         factory_v2 = None
         factory_v3 = UNISWAP_V3_FACTORY_BASE
         v3_fees    = (500, 3000, 10000, 100)
-
     nb = native.lower()
     t0, t1 = (ta, nb) if ta < nb else (nb, ta)
-
     if factory_v2:
         pair = _get_v2_pair(ta, native, factory_v2, chain)
         if pair:
             return pair, t0, t1, True
-
     for fee in v3_fees:
         pool = _get_v3_pool_addr(ta, native, factory_v3, fee, chain)
         if pool:
             return pool, t0, t1, False
-
     return None
 
 
@@ -536,24 +504,20 @@ def _find_pair_address(token_addr, chain):
 # Mint イベント監視
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
-                              token0, token1, is_v2):
-    mint_topic = V2_MINT_TOPIC if is_v2 else V3_MINT_TOPIC
-    deadline          = time.time() + MONITOR_TIMEOUT_SEC
+def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block, token0, token1, is_v2):
+    mint_topic         = V2_MINT_TOPIC if is_v2 else V3_MINT_TOPIC
+    deadline           = time.time() + MONITOR_TIMEOUT_SEC
     last_checked_block = from_block
-
     print(f"[{chain['name']}] Mint監視開始: {pair_addr[:12]} ({token_address[:12]})")
 
     while time.time() < deadline:
         time.sleep(3)
-
         latest_hex = evm_rpc(chain, "eth_blockNumber", [])
         if not latest_hex:
             continue
         latest_int = int(latest_hex, 16)
         if latest_int <= last_checked_block:
             continue
-
         logs = evm_rpc(chain, "eth_getLogs", [{
             "fromBlock": hex(last_checked_block + 1),
             "toBlock":   hex(latest_int),
@@ -561,75 +525,47 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
             "topics":    [mint_topic],
         }])
         last_checked_block = latest_int
-
         if not logs:
             continue
-
         print(f"[{chain['name']}] ⚡ Mint検知！即getReserves: {pair_addr[:12]}")
-
-        if is_v2:
-            liq = _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain)
-        else:
-            liq = _get_v3_pool_liquidity_usd(pair_addr, token0, token1, chain)
-
+        liq = (_get_v2_pair_liquidity_usd if is_v2 else _get_v3_pool_liquidity_usd)(
+            pair_addr, token0, token1, chain)
         if liq is None or liq < LIQUIDITY_MIN:
             print(f"[{chain['name']}] Mint後も流動性不足 ${liq or 0:,.0f} → 監視継続")
             continue
-
         print(f"[{chain['name']}] 流動性OK: ${liq:,.0f} → 保有率チェックへ")
-
         holder_result = [None]
         dex_result    = [None]
-
-        def _fetch_holder():
-            holder_result[0] = get_evm_holder_stats(token_address, chain, from_block)
-
-        def _fetch_dex():
-            dex_result[0] = analyze_dexscreener(token_address)
-
-        t_holder = threading.Thread(target=_fetch_holder, daemon=True)
-        t_dex    = threading.Thread(target=_fetch_dex,    daemon=True)
-        t_holder.start()
-        t_dex.start()
-        t_holder.join()
-        t_dex.join()
-
+        def _fetch_holder(): holder_result[0] = get_evm_holder_stats(token_address, chain, from_block)
+        def _fetch_dex():    dex_result[0]    = analyze_dexscreener(token_address)
+        t_h = threading.Thread(target=_fetch_holder, daemon=True)
+        t_d = threading.Thread(target=_fetch_dex,    daemon=True)
+        t_h.start(); t_d.start(); t_h.join(); t_d.join()
         holder_data = holder_result[0]
         dex         = dex_result[0]
-
         if holder_data is None:
             print(f"[{chain['name']}] 保有データ取得失敗 → 監視継続")
             continue
-
-        top10 = holder_data["top10_ratio"]
+        top10       = holder_data["top10_ratio"]
         top10_limit = chain.get("top10_max_pct", TOP10_MAX_PCT)
         print(f"[{chain['name']}] トップ10保有率: {top10:.1f}% (上限{top10_limit:.0f}%)")
         if top10 > top10_limit:
             print(f"[{chain['name']}] ❌ 保有集中高すぎ → スキップ")
             return
-
         liq_display = dex["liquidity"] if dex else liq
-        dex_extra   = (
-            f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-            f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
-        ) if dex else ""
+        dex_extra   = (f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                       f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n") if dex else ""
         holder_text, holder_judge = format_holder_output(holder_data)
         launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
-        msg = (
-            f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
-            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"アドレス: <code>{token_address}</code>\n\n"
-            f"💧 流動性: <b>${liq_display:,.0f}</b>\n"
-            f"{dex_extra}\n"
-            f"{holder_text}\n"
-            f"{holder_judge}\n\n"
-            f"📊 {chain['dex_url'].format(token_address)}\n"
-            f"{launch_line}"
-        )
+        msg = (f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
+               f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+               f"アドレス: <code>{token_address}</code>\n\n"
+               f"💧 流動性: <b>${liq_display:,.0f}</b>\n{dex_extra}\n"
+               f"{holder_text}\n{holder_judge}\n\n"
+               f"📊 {chain['dex_url'].format(token_address)}\n{launch_line}")
         send_telegram(msg)
         print(f"[{chain['name']}] ✅ Mint検知→即通知: {token_address[:16]}")
         return
-
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
 
 
@@ -643,120 +579,75 @@ def _process_evm_token(token_address, chain, from_block,
         if pair_addr and token0 and token1:
             liq = None
             for attempt in range(3):
-                if is_v2:
-                    liq = _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain)
-                else:
-                    liq = _get_v3_pool_liquidity_usd(pair_addr, token0, token1, chain)
-
+                liq = (_get_v2_pair_liquidity_usd if is_v2 else _get_v3_pool_liquidity_usd)(
+                    pair_addr, token0, token1, chain)
                 if liq is not None and liq > 0:
                     break
                 if attempt < 2:
                     time.sleep(1)
                     print(f"[{chain['name']}] 流動性リトライ {attempt+2}/3: {pair_addr[:12]}")
-
-            liq_str = f"${liq:,.0f}" if liq else "$0"
-            print(f"[{chain['name']}] オンチェーン流動性: {liq_str} ({token_address[:12]})")
-
+            print(f"[{chain['name']}] オンチェーン流動性: ${'%,.0f' % liq if liq else '0'} ({token_address[:12]})")
             if liq is None or liq < LIQUIDITY_MIN:
-                print(f"[{chain['name']}] オンチェーン流動性不足(${liq or 0:,.0f})"
-                      f" → Mint監視へ: {token_address[:12]}")
-                _wait_for_liquidity_mint(
-                    pair_addr, token_address, chain, from_block,
-                    token0, token1, is_v2,
-                )
+                print(f"[{chain['name']}] オンチェーン流動性不足(${liq or 0:,.0f}) → Mint監視へ: {token_address[:12]}")
+                _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block, token0, token1, is_v2)
                 return
-
             else:
                 holder_result = [None]
                 dex_result    = [None]
-
-                def _fetch_holder():
-                    holder_result[0] = get_evm_holder_stats(token_address, chain, from_block)
-
-                def _fetch_dex():
-                    dex_result[0] = analyze_dexscreener(token_address)
-
-                t_holder = threading.Thread(target=_fetch_holder, daemon=True)
-                t_dex    = threading.Thread(target=_fetch_dex,    daemon=True)
-                t_holder.start()
-                t_dex.start()
-                t_holder.join()
-                t_dex.join()
-
+                def _fetch_holder(): holder_result[0] = get_evm_holder_stats(token_address, chain, from_block)
+                def _fetch_dex():    dex_result[0]    = analyze_dexscreener(token_address)
+                t_h = threading.Thread(target=_fetch_holder, daemon=True)
+                t_d = threading.Thread(target=_fetch_dex,    daemon=True)
+                t_h.start(); t_d.start(); t_h.join(); t_d.join()
                 holder_data = holder_result[0]
                 dex         = dex_result[0]
-
                 if holder_data is None:
-                    # 保有データ取得失敗でもスキップせず流動性のみで通知（見逃し防止）
                     print(f"[{chain['name']}] 保有データ取得失敗 → 流動性のみで通知")
                     liq_display = dex["liquidity"] if dex else liq
-                    dex_extra   = (
-                        f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-                        f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
-                    ) if dex else ""
+                    dex_extra   = (f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                                   f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n") if dex else ""
                     launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
-                    msg = (
-                        f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
-                        f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                        f"アドレス: <code>{token_address}</code>\n\n"
-                        f"💧 流動性: <b>${liq_display:,.0f}</b>\n"
-                        f"{dex_extra}\n"
-                        f"⚠️ 保有率データ取得不可（要確認）\n\n"
-                        f"📊 {chain['dex_url'].format(token_address)}\n"
-                        f"{launch_line}"
-                    )
+                    msg = (f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
+                           f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                           f"アドレス: <code>{token_address}</code>\n\n"
+                           f"💧 流動性: <b>${liq_display:,.0f}</b>\n{dex_extra}\n"
+                           f"⚠️ 保有率データ取得不可（要確認）\n\n"
+                           f"📊 {chain['dex_url'].format(token_address)}\n{launch_line}")
                     send_telegram(msg)
                     print(f"[{chain['name']}] ✅ 通知送信完了（保有率なし）: {token_address[:16]}")
                     return
-
-                top10 = holder_data["top10_ratio"]
+                top10       = holder_data["top10_ratio"]
                 top10_limit = chain.get("top10_max_pct", TOP10_MAX_PCT)
                 print(f"[{chain['name']}] トップ10保有率: {top10:.1f}% (上限{top10_limit:.0f}%)")
                 if top10 > top10_limit:
                     print(f"[{chain['name']}] ❌ 保有集中高すぎ → スキップ")
                     return
-
                 liq_display = dex["liquidity"] if dex else liq
-                dex_extra   = (
-                    f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-                    f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n"
-                ) if dex else ""
+                dex_extra   = (f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+                               f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n") if dex else ""
                 holder_text, holder_judge = format_holder_output(holder_data)
                 launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
-                msg = (
-                    f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
-                    f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                    f"アドレス: <code>{token_address}</code>\n\n"
-                    f"💧 流動性: <b>${liq_display:,.0f}</b>\n"
-                    f"{dex_extra}\n"
-                    f"{holder_text}\n"
-                    f"{holder_judge}\n\n"
-                    f"📊 {chain['dex_url'].format(token_address)}\n"
-                    f"{launch_line}"
-                )
+                msg = (f"{chain['emoji']} <b>[{chain['name']}] 新規トークン検知！</b>\n\n"
+                       f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                       f"アドレス: <code>{token_address}</code>\n\n"
+                       f"💧 流動性: <b>${liq_display:,.0f}</b>\n{dex_extra}\n"
+                       f"{holder_text}\n{holder_judge}\n\n"
+                       f"📊 {chain['dex_url'].format(token_address)}\n{launch_line}")
                 send_telegram(msg)
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
                 return
 
-        # ── フォールバック: Factory直接クエリ → Mint監視 ────────────────────────
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
-
         while time.time() < deadline:
             found = _find_pair_address(token_address, chain)
             if found:
                 f_pair, f_t0, f_t1, f_is_v2 = found
                 print(f"[{chain['name']}] ⚡ ペア発見！Mint監視へ: {f_pair[:12]}")
-                _wait_for_liquidity_mint(
-                    f_pair, token_address, chain, from_block,
-                    f_t0, f_t1, f_is_v2,
-                )
+                _wait_for_liquidity_mint(f_pair, token_address, chain, from_block, f_t0, f_t1, f_is_v2)
                 return
-
             time.sleep(3)
-
         print(f"[{chain['name']}] タイムアウト → スキップ: {token_address[:16]}")
-
     except Exception as e:
         print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
 
@@ -771,32 +662,24 @@ def check_evm_chain(chain):
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
-
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
-
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
             from_block = latest_int - 500
         if from_block > latest_int:
             return
-
         logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(latest_int),
-            "address":   chain["contract"],
-            "topics":    [TRANSFER_TOPIC, ZERO_TOPIC],
+            "fromBlock": hex(from_block), "toBlock": hex(latest_int),
+            "address": chain["contract"], "topics": [TRANSFER_TOPIC, ZERO_TOPIC],
         }])
         chain["last_block"] = latest_int
-
         if not logs:
             return
-
         print(f"[{chain['name']}] {len(logs)}件のイベント検知")
-
         for log in logs:
             topics = log.get("topics", [])
             if len(topics) < 3:
@@ -804,23 +687,16 @@ def check_evm_chain(chain):
             token_address = ("0x" + topics[2][-40:]).lower()
             if token_address in chain["known_tokens"]:
                 continue
-
             chain["known_tokens"].add(token_address)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {token_address}")
-
-            t = threading.Thread(
-                target=_process_evm_token,
-                args=(token_address, chain, latest_int),
-                daemon=True,
-            )
-            t.start()
-
+            threading.Thread(target=_process_evm_token,
+                             args=(token_address, chain, latest_int), daemon=True).start()
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EVM 全般監視 (PancakeSwap V3 / Uniswap V3 PoolCreated)
+# EVM 全般監視 (PancakeSwap V2/V3 / Uniswap V3)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_all_chain(chain):
@@ -829,44 +705,33 @@ def check_evm_all_chain(chain):
         if not latest_hex:
             return
         latest_int = int(latest_hex, 16)
-
         if chain["last_block"] is None:
             chain["last_block"] = latest_int
             print(f"[{chain['name']}] 初期化完了: block={latest_int}")
             return
-
         from_block = chain["last_block"] + 1
         if latest_int - from_block > 500:
             print(f"[{chain['name']}] ブロック差={latest_int - from_block} → 制限適用")
             from_block = latest_int - 500
         if from_block > latest_int:
             return
-
         event_topic = chain.get("topic", POOL_CREATED_TOPIC)
         logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(latest_int),
-            "address":   chain["factory"],
-            "topics":    [event_topic],
+            "fromBlock": hex(from_block), "toBlock": hex(latest_int),
+            "address": chain["factory"], "topics": [event_topic],
         }])
         chain["last_block"] = latest_int
-
         if not logs:
             return
-
         print(f"[{chain['name']}] {len(logs)}件のPair/PoolCreatedイベント検知")
-
-        event_topic = chain.get("topic", POOL_CREATED_TOPIC)
         is_v2       = (event_topic == PAIR_CREATED_TOPIC)
         base_tokens = chain["base_tokens"]
-
         for log in logs:
             topics = log.get("topics", [])
             if len(topics) < 3:
                 continue
             token0 = ("0x" + topics[1][-40:]).lower()
             token1 = ("0x" + topics[2][-40:]).lower()
-
             t0_is_base = token0 in base_tokens
             t1_is_base = token1 in base_tokens
             if not t0_is_base and t1_is_base:
@@ -875,10 +740,8 @@ def check_evm_all_chain(chain):
                 new_token = token1
             else:
                 continue
-
             if new_token in chain["known_tokens"]:
                 continue
-
             raw_data  = log.get("data", "0x")
             pair_addr = None
             try:
@@ -888,20 +751,15 @@ def check_evm_all_chain(chain):
                     pair_addr = "0x" + raw_data[90:130]
             except Exception:
                 pair_addr = None
-
             chain["known_tokens"].add(new_token)
             print(f"[{chain['name']}] 新規トークン → スレッド起動: {new_token}"
                   f" pair={pair_addr[:12] if pair_addr else 'None'}")
-
-            t = threading.Thread(
+            threading.Thread(
                 target=_process_evm_token,
                 args=(new_token, chain, latest_int),
-                kwargs={"pair_addr": pair_addr, "token0": token0,
-                        "token1": token1, "is_v2": is_v2},
+                kwargs={"pair_addr": pair_addr, "token0": token0, "token1": token1, "is_v2": is_v2},
                 daemon=True,
-            )
-            t.start()
-
+            ).start()
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
@@ -936,42 +794,31 @@ def solana_rpc(method, params):
 
 def get_new_pumpfun_transactions():
     global last_signature
-    all_txns  = []
-    before    = None
+    all_txns   = []
+    before     = None
     is_catchup = (last_signature is None)
-
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
-        if last_signature:
-            opts["until"] = last_signature
-        if before:
-            opts["before"] = before
-
+        if last_signature: opts["until"]  = last_signature
+        if before:         opts["before"] = before
         result = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, opts])
         if not result:
             break
-
         all_txns.extend(result)
-
         if len(result) < 50:
             break
-
         if is_catchup:
             print(f"[Pump.fun] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
-
         if len(all_txns) >= 50:
             print(f"[Pump.fun] ページネーション上限50件 → 打ち切り")
             break
-
         before = result[-1].get("signature")
         time.sleep(0.1)
-
     if all_txns:
         last_signature = all_txns[0].get("signature", "")
         if len(all_txns) > 1:
             print(f"[Pump.fun] {len(all_txns)}件の新規TX検出")
-
     return all_txns
 
 
@@ -983,13 +830,11 @@ def parse_new_token(signature):
         "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
         "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
     }
-
     result = None
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
             signature,
-            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
-             "commitment": "confirmed"},
+            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"},
         ])
         if result:
             break
@@ -998,8 +843,7 @@ def parse_new_token(signature):
     if not result:
         return False
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
-    pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
-    pre_mints = {b.get("mint") for b in pre_balances}
+    pre_mints     = {b.get("mint") for b in result.get("meta", {}).get("preTokenBalances", [])}
     for balance in post_balances:
         mint = balance.get("mint", "")
         if mint and mint not in pre_mints and mint not in IGNORED_MINTS:
@@ -1016,24 +860,19 @@ def parse_new_fungible_mint(signature):
         "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
         "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
     }
-
     result = None
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
             signature,
-            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
-             "commitment": "confirmed"},
+            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"},
         ])
         if result:
             break
         time.sleep(0.5)
     if not result:
         return False
-
     post_balances = result.get("meta", {}).get("postTokenBalances", [])
-    pre_balances  = result.get("meta", {}).get("preTokenBalances", [])
-    pre_mints = {b.get("mint") for b in pre_balances}
-
+    pre_mints     = {b.get("mint") for b in result.get("meta", {}).get("preTokenBalances", [])}
     for balance in post_balances:
         mint     = balance.get("mint", "")
         decimals = balance.get("uiTokenAmount", {}).get("decimals", 0)
@@ -1054,12 +893,10 @@ def get_solana_holder_stats(mint):
         total_supply = float(supply_result["value"]["amount"])
         if total_supply == 0:
             return None
-
         accounts_result = solana_rpc("getTokenLargestAccounts", [mint])
         if not accounts_result:
             return None
-        accounts = accounts_result["value"][:10]
-
+        accounts     = accounts_result["value"][:10]
         top10_detail = []
         top10_total  = 0
         for i, acc in enumerate(accounts):
@@ -1068,10 +905,8 @@ def get_solana_holder_stats(mint):
             short  = acc["address"][:6] + "..." + acc["address"][-4:]
             top10_detail.append(f"  {'ABCDEFGHIJ'[i]}. {short}: {ratio:.1f}%")
             top10_total += amount
-
-        top10_ratio = top10_total / total_supply * 100
         return {
-            "top10_ratio":  top10_ratio,
+            "top10_ratio":  top10_total / total_supply * 100,
             "top10_detail": top10_detail,
         }
     except Exception as e:
@@ -1083,18 +918,10 @@ def format_holder_output(holder_data):
     if not holder_data:
         return "👛 保有者データ取得中...\n", ""
     top10_lines = "\n".join(holder_data["top10_detail"])
-    text = (
-        f"👛 <b>保有者分析</b> (実際の保有量)\n"
-        f"上位10保有者合計: {holder_data['top10_ratio']:.0f}%\n"
-        f"{top10_lines}\n"
-    )
-    top10_ratio = holder_data["top10_ratio"]
-    if top10_ratio >= 50:
-        judge = "🚨 保有集中度高め"
-    elif top10_ratio < 30:
-        judge = "✅ 分散した保有"
-    else:
-        judge = "🟡 やや集中気味"
+    text = (f"👛 <b>保有者分析</b> (実際の保有量)\n"
+            f"上位10保有者合計: {holder_data['top10_ratio']:.0f}%\n{top10_lines}\n")
+    r = holder_data["top10_ratio"]
+    judge = "🚨 保有集中度高め" if r >= 50 else ("✅ 分散した保有" if r < 30 else "🟡 やや集中気味")
     return text, judge
 
 
@@ -1104,16 +931,12 @@ def get_evm_holder_stats(token_address, chain, from_block):
         if not latest_hex:
             return None
         latest = int(latest_hex, 16)
-
         logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(latest),
-            "address":   token_address,
-            "topics":    [TRANSFER_TOPIC],
+            "fromBlock": hex(from_block), "toBlock": hex(latest),
+            "address": token_address, "topics": [TRANSFER_TOPIC],
         }])
         if not logs:
             return None
-
         balances  = {}
         ZERO_ADDR = "0x" + "0" * 40
         for log in logs:
@@ -1129,55 +952,35 @@ def get_evm_holder_stats(token_address, chain, from_block):
                 amount = 0
             if amount == 0:
                 continue
-            if from_addr != ZERO_ADDR:
-                balances[from_addr] = balances.get(from_addr, 0) - amount
-            if to_addr != ZERO_ADDR:
-                balances[to_addr]   = balances.get(to_addr, 0)   + amount
-
+            if from_addr != ZERO_ADDR: balances[from_addr] = balances.get(from_addr, 0) - amount
+            if to_addr   != ZERO_ADDR: balances[to_addr]   = balances.get(to_addr,   0) + amount
         positive = {addr: bal for addr, bal in balances.items() if bal > 0}
         if not positive:
             return None
-
-        total = sum(positive.values())
-        if total == 0:
-            return None
-
+        total          = sum(positive.values())
         sorted_holders = sorted(positive.items(), key=lambda x: x[1], reverse=True)
         top10          = sorted_holders[:10]
         top10_total    = sum(bal for _, bal in top10)
-        top10_ratio    = top10_total / total * 100
-
-        top10_detail = []
-        for i, (addr, bal) in enumerate(top10):
-            ratio = bal / total * 100
-            short = addr[:6] + "..." + addr[-4:]
-            top10_detail.append(f"  {'ABCDEFGHIJ'[i]}. {short}: {ratio:.1f}%")
-
-        return {
-            "top10_ratio":  top10_ratio,
-            "top10_detail": top10_detail,
-        }
-
+        top10_detail   = [
+            f"  {'ABCDEFGHIJ'[i]}. {addr[:6]}...{addr[-4:]}: {bal/total*100:.1f}%"
+            for i, (addr, bal) in enumerate(top10)
+        ]
+        return {"top10_ratio": top10_total / total * 100, "top10_detail": top10_detail}
     except Exception as e:
         print(f"[{chain['name']}] EVM保有量トップ10取得エラー: {e}")
         return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Solana トークン処理スレッド
+# Solana トークン処理スレッド（pump.fun / Solana全般 共通）
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _process_solana_token(mint, label="Pump.fun", pump_link=True):
-    """
-    pump.funトークン（pump_link=True）: pump.fun独自API優先
-    Solana全般（pump_link=False）: まずpump.fun APIを試行→fast path、失敗ならDexScreener
-    """
     try:
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{label}] 閾値監視開始: {mint[:20]}"
               f" (流動性${LIQUIDITY_MIN:,}+, トップ10≤{TOP10_MAX_PCT}%)")
 
-        # pump_link=False でも pump.fun API が使えるかチェック（Solana全般高速化）
         effective_pump = pump_link
         if not pump_link:
             pf_probe = analyze_pumpfun_api(mint)
@@ -1192,20 +995,17 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                 if pf:
                     liq = pf["liquidity"]
                     print(f"[{label}] pump.fun API 時価総額: ${liq:,.0f} ({mint[:16]})")
-
                     if liq >= LIQUIDITY_MIN:
                         holder_data = get_solana_holder_stats(mint)
                         if holder_data is None:
                             time.sleep(POLL_INTERVAL_SEC)
                             continue
-
                         top10 = holder_data["top10_ratio"]
                         print(f"[{label}] トップ10保有率: {top10:.1f}%")
                         if top10 > TOP10_MAX_PCT:
                             print(f"[{label}] ❌ 保有集中高すぎ → スキップ")
                             return
-
-                        dex = analyze_dexscreener(mint)
+                        dex      = analyze_dexscreener(mint)
                         platform = _get_platform_name(dex) if dex else "pump.fun"
                         dex_text = _build_dex_text(dex) if dex else (
                             f"💧 時価総額: ${liq:,.0f}\n"
@@ -1213,72 +1013,55 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                         )
                         holder_text, holder_judge = format_holder_output(holder_data)
                         token_name = f"{pf['name']} (${pf['symbol']})\n" if pf.get("name") else ""
-                        msg = (
-                            f"🚀 <b>[Solana/{platform}] 新規トークン検知！</b>\n\n"
-                            f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                            f"{token_name}"
-                            f"📋 Mintアドレス（タップでコピー）\n"
-                            f"<code>{mint}</code>\n\n"
-                            f"{dex_text}"
-                            f"{holder_text}\n"
-                            f"{holder_judge}\n\n"
-                            f"📊 https://dexscreener.com/solana/{mint}\n"
-                            f"📱 <a href=\"https://pump.fun/{mint}\">pump.fun（Bitget Walletで開く）</a>"
-                        )
+                        msg = (f"🚀 <b>[Solana/{platform}] 新規トークン検知！</b>\n\n"
+                               f"時刻: {datetime.now().strftime('%H:%M:%S')}\n{token_name}"
+                               f"📋 Mintアドレス（タップでコピー）\n<code>{mint}</code>\n\n"
+                               f"{dex_text}{holder_text}\n{holder_judge}\n\n"
+                               f"📊 https://dexscreener.com/solana/{mint}\n"
+                               f"📱 <a href=\"https://pump.fun/{mint}\">pump.fun（Bitget Walletで開く）</a>")
                         send_telegram(msg)
                         print(f"[{label}] ✅ pump.fun API経由で通知: {mint[:20]}")
                         return
-
                     time.sleep(POLL_INTERVAL_SEC)
                     continue
+                # pump.fun API失敗 → 以降DexScreener一本化（530連打を防ぐ）
+                effective_pump = False
 
             dex = analyze_dexscreener(mint)
             if not dex:
                 time.sleep(POLL_INTERVAL_SEC)
                 continue
-
             liq = dex['liquidity']
             print(f"[{label}] DexScreener 流動性: ${liq:,.0f} ({mint[:16]})")
-
             if liq >= LIQUIDITY_MIN:
                 holder_data = get_solana_holder_stats(mint)
                 if holder_data is None:
                     time.sleep(POLL_INTERVAL_SEC)
                     continue
-
                 top10 = holder_data["top10_ratio"]
                 print(f"[{label}] トップ10保有率: {top10:.1f}%")
                 if top10 > TOP10_MAX_PCT:
                     print(f"[{label}] ❌ 保有集中高すぎ ({top10:.1f}% > {TOP10_MAX_PCT}%) → スキップ")
                     return
-
-                platform     = _get_platform_name(dex)
-                dex_text     = _build_dex_text(dex)
+                platform = _get_platform_name(dex)
+                dex_text = _build_dex_text(dex)
                 holder_text, holder_judge = format_holder_output(holder_data)
                 pump_line = (
                     f"📱 <a href=\"https://pump.fun/{mint}\">pump.fun（Bitget Walletで開く）</a>"
                     if effective_pump else
                     f"🔍 https://solscan.io/token/{mint}"
                 )
-                msg = (
-                    f"🚀 <b>[Solana/{platform}] 新規トークン検知！</b>\n\n"
-                    f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                    f"📋 Mintアドレス（タップでコピー）\n"
-                    f"<code>{mint}</code>\n\n"
-                    f"{dex_text}"
-                    f"{holder_text}\n"
-                    f"{holder_judge}\n\n"
-                    f"📊 https://dexscreener.com/solana/{mint}\n"
-                    f"{pump_line}"
-                )
+                msg = (f"🚀 <b>[Solana/{platform}] 新規トークン検知！</b>\n\n"
+                       f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                       f"📋 Mintアドレス（タップでコピー）\n<code>{mint}</code>\n\n"
+                       f"{dex_text}{holder_text}\n{holder_judge}\n\n"
+                       f"📊 https://dexscreener.com/solana/{mint}\n{pump_line}")
                 send_telegram(msg)
                 print(f"[{label}] ✅ 通知送信完了: {mint[:20]}")
                 return
-
             time.sleep(POLL_INTERVAL_SEC)
 
         print(f"[{label}] タイムアウト(5分) → スキップ: {mint[:20]}")
-
     except Exception as e:
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
 
@@ -1302,8 +1085,7 @@ def _handle_pumpfun_sig(sig):
             return
         known_token_mints.add(mint)
     print(f"[Pump.fun] 新規mint → スレッド起動: {mint[:20]}")
-    t = threading.Thread(target=_wrapped_process_solana, args=(mint,), daemon=True)
-    t.start()
+    threading.Thread(target=_wrapped_process_solana, args=(mint,), daemon=True).start()
 
 
 def check_pumpfun_onchain():
@@ -1311,17 +1093,12 @@ def check_pumpfun_onchain():
     txns = get_new_pumpfun_transactions()
     if not txns:
         return
-
-    now = time.time()
+    now           = time.time()
     before_filter = len(txns)
-    txns = [tx for tx in txns
-            if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
+    txns = [tx for tx in txns if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
     if len(txns) < before_filter:
-        print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ"
-              f"（残り{len(txns)}件）")
-
-    sigs = [tx.get("signature", "") for tx in txns
-            if tx.get("signature") and not tx.get("err")]
+        print(f"[Pump.fun] 古いTX除外: {before_filter - len(txns)}件スキップ（残り{len(txns)}件）")
+    sigs = [tx.get("signature", "") for tx in txns if tx.get("signature") and not tx.get("err")]
     if not sigs:
         return
     print(f"[Pump.fun] {len(sigs)}件を並列処理開始")
@@ -1336,30 +1113,25 @@ def check_pumpfun_onchain():
 def process_retry_queue():
     global known_token_mints
     now = time.time()
-
     with RETRY_SIG_LOCK:
         if not RETRY_SIG_QUEUE:
             return
         valid   = [(s, t) for s, t in RETRY_SIG_QUEUE if now - t <= RETRY_EXPIRY]
         expired = len(RETRY_SIG_QUEUE) - len(valid)
         RETRY_SIG_QUEUE.clear()
-
     if expired > 0:
         print(f"[Pump.fun] リトライ期限切れ: {expired}件 破棄")
     if not valid:
         return
-
     print(f"[Pump.fun] リトライ処理: {len(valid)}件")
     still_failed = []
     for sig, enqueued_at in valid:
         time.sleep(1.0)
         mint = parse_new_token(sig)
-
         if mint is False:
             if time.time() - enqueued_at <= RETRY_EXPIRY:
                 still_failed.append((sig, enqueued_at))
             continue
-
         if not mint:
             continue
         with KNOWN_MINTS_LOCK:
@@ -1367,13 +1139,7 @@ def process_retry_queue():
                 continue
             known_token_mints.add(mint)
         print(f"[Pump.fun] ✅ リトライ成功！mint → スレッド起動: {mint[:20]}")
-        t = threading.Thread(
-            target=_wrapped_process_solana,
-            args=(mint,),
-            daemon=True,
-        )
-        t.start()
-
+        threading.Thread(target=_wrapped_process_solana, args=(mint,), daemon=True).start()
     if still_failed:
         with RETRY_SIG_LOCK:
             RETRY_SIG_QUEUE.extend(still_failed)
@@ -1389,56 +1155,39 @@ def get_new_metadata_transactions():
     all_txns = []
     before   = None
     is_first = (all_solana_last_signature is None)
-
     while True:
         opts = {"limit": 50, "commitment": "confirmed"}
-        if all_solana_last_signature:
-            opts["until"] = all_solana_last_signature
-        if before:
-            opts["before"] = before
-
+        if all_solana_last_signature: opts["until"]  = all_solana_last_signature
+        if before:                    opts["before"] = before
         result = solana_rpc("getSignaturesForAddress", [SPL_METADATA_PROGRAM, opts])
         if not result:
             break
-
         all_txns.extend(result)
-
         if len(result) < 50:
             break
-
         if is_first:
             print(f"[Solana全般] 初回起動: 最新{len(all_txns)}件のみ処理（遡り制限）")
             break
-
         if len(all_txns) >= 200:
             print("[Solana全般] ページネーション上限200件 → 打ち切り")
             break
-
         before = result[-1].get("signature")
         time.sleep(0.1)
-
     if all_txns:
         all_solana_last_signature = all_txns[0].get("signature", "")
         if len(all_txns) > 1:
             print(f"[Solana全般] {len(all_txns)}件の新規TX検出")
-
     return all_txns
 
 
 def _get_platform_name(dex):
     if not dex:
         return "Unknown"
-    dex_id = dex.get("dex_id", "").lower()
+    dex_id   = dex.get("dex_id", "").lower()
     name_map = {
-        "raydium":        "Raydium",
-        "pump-fun":       "pump.fun",
-        "pumpfun":        "pump.fun",
-        "orca":           "Orca",
-        "meteora":        "Meteora",
-        "jupiter":        "Jupiter",
-        "rapidlaunch":    "rapidlaunch.io",
-        "moonshot":       "Moonshot",
-        "letsbonk":       "LetsBonk",
+        "raydium": "Raydium", "pump-fun": "pump.fun", "pumpfun": "pump.fun",
+        "orca": "Orca", "meteora": "Meteora", "jupiter": "Jupiter",
+        "rapidlaunch": "rapidlaunch.io", "moonshot": "Moonshot", "letsbonk": "LetsBonk",
     }
     for key, label in name_map.items():
         if key in dex_id:
@@ -1449,11 +1198,9 @@ def _get_platform_name(dex):
 def _build_dex_text(dex):
     if not dex:
         return "📊 価格データ取得中...\n\n"
-    return (
-        f"💧 流動性: ${dex['liquidity']:,.0f}\n"
-        f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
-        f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n\n"
-    )
+    return (f"💧 流動性: ${dex['liquidity']:,.0f}\n"
+            f"📈 価格変動: {dex['price_change_5m']:+.1f}%/5分\n"
+            f"🛒 買い{dex['buys_5m']}件 / 売り{dex['sells_5m']}件 (5分)\n\n")
 
 
 def _handle_metadata_sig(sig):
@@ -1466,12 +1213,8 @@ def _handle_metadata_sig(sig):
             return
         known_token_mints.add(mint)
     print(f"[Solana全般] 新規ファンジブルmint → スレッド起動: {mint[:20]}")
-    t = threading.Thread(
-        target=_wrapped_process_solana,
-        args=(mint, "Solana全般", False),
-        daemon=True,
-    )
-    t.start()
+    threading.Thread(target=_wrapped_process_solana,
+                     args=(mint, "Solana全般", False), daemon=True).start()
 
 
 def check_all_solana_onchain():
@@ -1479,17 +1222,12 @@ def check_all_solana_onchain():
     txns = get_new_metadata_transactions()
     if not txns:
         return
-
-    now = time.time()
+    now           = time.time()
     before_filter = len(txns)
-    txns = [tx for tx in txns
-            if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
+    txns = [tx for tx in txns if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
     if len(txns) < before_filter:
-        print(f"[Solana全般] 古いTX除外: {before_filter - len(txns)}件スキップ"
-              f"（残り{len(txns)}件）")
-
-    sigs = [tx.get("signature", "") for tx in txns
-            if tx.get("signature") and not tx.get("err")]
+        print(f"[Solana全般] 古いTX除外: {before_filter - len(txns)}件スキップ（残り{len(txns)}件）")
+    sigs = [tx.get("signature", "") for tx in txns if tx.get("signature") and not tx.get("err")]
     if not sigs:
         return
     print(f"[Solana全般] {len(sigs)}件を並列処理開始")
@@ -1500,14 +1238,12 @@ def check_all_solana_onchain():
 def pumpfun_monitor_loop():
     global last_signature
     print("[Pump.fun] 監視ループ開始中...")
-
     init_sigs = solana_rpc("getSignaturesForAddress", [PUMPFUN_PROGRAM, {"limit": 5}])
     if init_sigs:
         last_signature = init_sigs[0].get("signature", "")
         print(f"[Pump.fun] 初期化完了 sig={last_signature[:20]}")
     else:
         print("[Pump.fun] 初期化失敗（RPC応答なし）→ 次回から取得")
-
     while True:
         try:
             check_pumpfun_onchain()
@@ -1520,15 +1256,12 @@ def pumpfun_monitor_loop():
 def solana_all_monitor_loop():
     global all_solana_last_signature
     print("[Solana全般] 監視ループ開始中...")
-
-    init_sigs = solana_rpc("getSignaturesForAddress",
-                           [SPL_METADATA_PROGRAM, {"limit": 5}])
+    init_sigs = solana_rpc("getSignaturesForAddress", [SPL_METADATA_PROGRAM, {"limit": 5}])
     if init_sigs:
         all_solana_last_signature = init_sigs[0].get("signature", "")
         print(f"[Solana全般] 初期化完了 sig={all_solana_last_signature[:20]}")
     else:
         print("[Solana全般] 初期化失敗（RPC応答なし）→ 次回から取得")
-
     while True:
         try:
             check_all_solana_onchain()
@@ -1546,45 +1279,35 @@ def parse_raydium_new_pool(signature):
     for attempt in range(3):
         result = solana_rpc("getTransaction", [
             signature,
-            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
-             "commitment": "confirmed"},
+            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"},
         ])
         if result:
             break
         time.sleep(0.5)
     if not result:
         return False
-
     meta          = result.get("meta", {}) or {}
     post_balances = meta.get("postTokenBalances", []) or []
-    pre_balances  = meta.get("preTokenBalances",  []) or []
-    pre_mints     = {b.get("mint") for b in pre_balances}
-
+    pre_mints     = {b.get("mint") for b in meta.get("preTokenBalances", []) or []}
     new_mint = None
     for b in post_balances:
         mint = b.get("mint", "")
-        if not mint or mint in pre_mints:
-            continue
-        if mint in SOLANA_BASE_TOKENS:
+        if not mint or mint in pre_mints or mint in SOLANA_BASE_TOKENS:
             continue
         new_mint = mint
         break
-
     if not new_mint:
         return None
-
     liq_usd = 0.0
     for b in post_balances:
-        mint     = b.get("mint", "")
-        ui_amt   = float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+        mint   = b.get("mint", "")
+        ui_amt = float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
         if mint == WSOL_MINT and ui_amt > 0:
-            sol_price = _get_sol_price_usd()
-            liq_usd   = ui_amt * sol_price
+            liq_usd = ui_amt * _get_sol_price_usd()
             break
         if mint in (USDC_MINT, USDT_MINT) and ui_amt > 0:
             liq_usd = ui_amt
             break
-
     print(f"[Raydium] 新規プール: {new_mint[:20]} 流動性=${liq_usd:,.0f}")
     return new_mint, liq_usd
 
@@ -1598,33 +1321,25 @@ def _process_raydium_token(mint, liq_usd):
                 print(f"[Raydium] 保有データ取得失敗 → DexScreenerフォールバック: {mint[:20]}")
                 _process_solana_token(mint, "Raydium", False)
                 return
-
             top10 = holder_data["top10_ratio"]
             print(f"[Raydium] トップ10保有率: {top10:.1f}%")
             if top10 > TOP10_MAX_PCT:
                 print(f"[Raydium] ❌ 保有集中高すぎ → スキップ")
                 return
-
-            dex = analyze_dexscreener(mint)
-            dex_text = _build_dex_text(dex) if dex else f"💧 流動性: ${liq_usd:,.0f}\n\n"
+            dex          = analyze_dexscreener(mint)
+            dex_text     = _build_dex_text(dex) if dex else f"💧 流動性: ${liq_usd:,.0f}\n\n"
             holder_text, holder_judge = format_holder_output(holder_data)
-            msg = (
-                f"⚡ <b>[Solana/Raydium] 新規トークン検知！</b>\n\n"
-                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"📋 Mintアドレス（タップでコピー）\n"
-                f"<code>{mint}</code>\n\n"
-                f"{dex_text}"
-                f"{holder_text}\n"
-                f"{holder_judge}\n\n"
-                f"📊 https://dexscreener.com/solana/{mint}\n"
-                f"🔍 https://solscan.io/token/{mint}"
-            )
+            msg = (f"⚡ <b>[Solana/Raydium] 新規トークン検知！</b>\n\n"
+                   f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                   f"📋 Mintアドレス（タップでコピー）\n<code>{mint}</code>\n\n"
+                   f"{dex_text}{holder_text}\n{holder_judge}\n\n"
+                   f"📊 https://dexscreener.com/solana/{mint}\n"
+                   f"🔍 https://solscan.io/token/{mint}")
             send_telegram(msg)
             print(f"[Raydium] ✅ 即通知完了: {mint[:20]}")
         else:
             print(f"[Raydium] 流動性不足 ${liq_usd:,.0f} → DexScreener監視: {mint[:20]}")
             _process_solana_token(mint, "Raydium", False)
-
     except Exception as e:
         print(f"[Raydium] スレッドエラー ({mint[:20]}): {e}")
 
@@ -1640,40 +1355,27 @@ def _handle_raydium_tx(sig):
             return
         known_token_mints.add(mint)
     print(f"[Raydium] 新規mint → スレッド起動: {mint[:20]} (${liq_usd:,.0f})")
-    t = threading.Thread(
-        target=_wrapped_process_raydium,
-        args=(mint, liq_usd),
-        daemon=True,
-    )
-    t.start()
+    threading.Thread(target=_wrapped_process_raydium, args=(mint, liq_usd), daemon=True).start()
 
 
 def check_raydium_onchain():
     global raydium_last_sigs
     now = time.time()
-
     for program in (RAYDIUM_AMM_V4, RAYDIUM_CPMM):
         label = "Raydium_AMM_V4" if program == RAYDIUM_AMM_V4 else "Raydium_CPMM"
         opts  = {"limit": 50, "commitment": "confirmed"}
         if raydium_last_sigs[program]:
             opts["until"] = raydium_last_sigs[program]
-
         txns = solana_rpc("getSignaturesForAddress", [program, opts])
         if not txns:
             continue
-
         raydium_last_sigs[program] = txns[0].get("signature", "")
-
-        txns = [tx for tx in txns
-                if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
+        txns = [tx for tx in txns if not tx.get("blockTime") or (now - tx["blockTime"]) <= 300]
         if not txns:
             continue
-
-        sigs = [tx.get("signature", "") for tx in txns
-                if tx.get("signature") and not tx.get("err")]
+        sigs = [tx.get("signature", "") for tx in txns if tx.get("signature") and not tx.get("err")]
         if not sigs:
             continue
-
         print(f"[{label}] {len(sigs)}件を並列処理開始")
         for sig in sigs:
             _RAYDIUM_POOL.submit(_handle_raydium_tx, sig)
@@ -1682,7 +1384,6 @@ def check_raydium_onchain():
 def raydium_monitor_loop():
     global raydium_last_sigs
     print("[Raydium] 監視ループ開始中...")
-
     for program in (RAYDIUM_AMM_V4, RAYDIUM_CPMM):
         label = "AMM_V4" if program == RAYDIUM_AMM_V4 else "CPMM"
         init  = solana_rpc("getSignaturesForAddress", [program, {"limit": 5}])
@@ -1691,13 +1392,12 @@ def raydium_monitor_loop():
             print(f"[Raydium/{label}] 初期化完了 sig={raydium_last_sigs[program][:20]}")
         else:
             print(f"[Raydium/{label}] 初期化失敗（RPC応答なし）→ 次回から取得")
-
     while True:
         try:
             check_raydium_onchain()
         except Exception as e:
             print(f"[Raydium] ループエラー: {e}")
-        time.sleep(5)  # 5秒ごと（高速化）
+        time.sleep(5)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1709,11 +1409,7 @@ def get_cex_symbols():
         r = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
         data = r.json()
         if data.get("code") == "00000":
-            return {
-                item["symbol"]
-                for item in data["data"]
-                if item.get("status") == "online"
-            }
+            return {item["symbol"] for item in data["data"] if item.get("status") == "online"}
     except Exception as e:
         print(f"Bitget APIエラー: {e}")
     return set()
@@ -1722,7 +1418,7 @@ def get_cex_symbols():
 def get_bitget_contract_addresses(coin):
     try:
         url = f"https://api.bitget.com/api/v2/spot/public/coins?coin={coin}"
-        r = requests.get(url, headers=HEADERS, timeout=8)
+        r   = requests.get(url, headers=HEADERS, timeout=8)
         if r.status_code != 200:
             return {}
         data = r.json()
@@ -1731,13 +1427,11 @@ def get_bitget_contract_addresses(coin):
         coins = data.get("data", [])
         if not coins:
             return {}
-        addresses = {}
-        for chain in coins[0].get("chains", []):
-            chain_name = chain.get("chain", "")
-            contract   = chain.get("contractAddress", "")
-            if chain_name and contract:
-                addresses[chain_name] = contract
-        return addresses
+        return {
+            chain.get("chain", ""): chain.get("contractAddress", "")
+            for chain in coins[0].get("chains", [])
+            if chain.get("chain") and chain.get("contractAddress")
+        }
     except Exception as e:
         print(f"[CEX] コントラクトアドレス取得エラー: {e}")
         return {}
@@ -1752,25 +1446,17 @@ def check_cex_listings():
         return
     for symbol in current - known_cex_symbols:
         if symbol.endswith("USDT"):
-            base = symbol.replace("USDT", "")
-
+            base      = symbol.replace("USDT", "")
             addresses = get_bitget_contract_addresses(base)
-
             addr_text = ""
             if addresses:
-                lines = []
-                for chain_name, addr in list(addresses.items())[:5]:
-                    lines.append(f"  <b>{chain_name}:</b> <code>{addr}</code>")
+                lines     = [f"  <b>{cn}:</b> <code>{addr}</code>" for cn, addr in list(addresses.items())[:5]]
                 addr_text = "📋 コントラクトアドレス:\n" + "\n".join(lines) + "\n\n"
-
-            msg = (
-                f"🏦 <b>[CEX] Bitget新規上場！</b>\n\n"
-                f"トークン: <b>${base}</b>\n"
-                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
-                f"{addr_text}"
-                f"✅ Bitget審査済み（比較的安全）\n"
-                f"🔗 https://www.bitget.com/spot/{base}USDT_SPBL"
-            )
+            msg = (f"🏦 <b>[CEX] Bitget新規上場！</b>\n\n"
+                   f"トークン: <b>${base}</b>\n"
+                   f"時刻: {datetime.now().strftime('%H:%M:%S')}\n\n"
+                   f"{addr_text}✅ Bitget審査済み（比較的安全）\n"
+                   f"🔗 https://www.bitget.com/spot/{base}USDT_SPBL")
             send_telegram(msg)
             print(f"[CEX新規] {symbol} アドレス={len(addresses)}チェーン")
     known_cex_symbols = current
@@ -1802,16 +1488,11 @@ def main():
         "moonshot / letsbonk / その他全Solana launchpad"
     )
 
-    t_pumpfun = threading.Thread(target=pumpfun_monitor_loop, daemon=True)
-    t_pumpfun.start()
+    threading.Thread(target=pumpfun_monitor_loop,    daemon=True).start()
     print("[Pump.fun] バックグラウンドスレッド起動完了")
-
-    t_all_solana = threading.Thread(target=solana_all_monitor_loop, daemon=True)
-    t_all_solana.start()
+    threading.Thread(target=solana_all_monitor_loop, daemon=True).start()
     print("[Solana全般] バックグラウンドスレッド起動完了")
-
-    t_raydium = threading.Thread(target=raydium_monitor_loop, daemon=True)
-    t_raydium.start()
+    threading.Thread(target=raydium_monitor_loop,    daemon=True).start()
     print("[Raydium] バックグラウンドスレッド起動完了")
 
     loop = 0
@@ -1822,23 +1503,16 @@ def main():
             check_evm_chain(chain)
         for chain in EVM_ALL_CHAINS:
             check_evm_all_chain(chain)
-
         time.sleep(5)
         loop += 1
         if loop % 360 == 0:
-            evm_status = " ".join(
-                f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS
-            )
-            all_status = " ".join(
-                f"{c['name']}={len(c['known_tokens'])}" for c in EVM_ALL_CHAINS
-            )
+            evm_status     = " ".join(f"{c['name']}={len(c['known_tokens'])}" for c in EVM_CHAINS)
+            all_status     = " ".join(f"{c['name']}={len(c['known_tokens'])}" for c in EVM_ALL_CHAINS)
             active_threads = threading.active_count() - 1
-            print(
-                f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
-                f"CEX={len(known_cex_symbols)} "
-                f"Solana={len(known_token_mints)} {evm_status} {all_status} "
-                f"監視スレッド={active_threads}"
-            )
+            print(f"[{datetime.now().strftime('%H:%M')}] 稼働中 "
+                  f"CEX={len(known_cex_symbols)} "
+                  f"Solana={len(known_token_mints)} {evm_status} {all_status} "
+                  f"監視スレッド={active_threads}")
 
 
 if __name__ == "__main__":
