@@ -14,11 +14,11 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
 
 # Solana RPC ラウンドロビンリスト（429対策: 複数RPC分散）
-# Helius(有料/無料10RPS) + Ankr(無料) + Publicnode(無料) で実効帯域を3倍化
+# Helius(10RPS) + Publicnode(無料) + Solana Foundation公式(無料) で分散
 _SOLANA_RPC_LIST = [r for r in [
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}" if HELIUS_KEY else None,
-    "https://rpc.ankr.com/solana",
     "https://solana.publicnode.com",
+    "https://api.mainnet-beta.solana.com",
 ] if r]
 SOLANA_RPC = _SOLANA_RPC_LIST[0]  # 後方互換性のために残す
 _solana_rpc_idx      = 0
@@ -213,8 +213,6 @@ RETRY_SIG_LOCK  = threading.Lock()
 RETRY_EXPIRY    = 300
 
 # ── Solana RPCグローバルレート制限 ────────────────────────────────────────────
-# 3本のRPC（Helius/Ankr/Publicnode）にラウンドロビンするため
-# 1本あたり6 RPS × 3本 = 18 RPS を上限とする。
 _SOLANA_RPS_LIMIT  = 18
 _solana_rpc_times  = []
 _solana_rpc_lock   = threading.Lock()
@@ -821,7 +819,7 @@ def check_evm_chain(chain):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EVM 全般監視 (PancakeSwap V2/V3 / Uniswap V3)
+# EVM 全般監視
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_all_chain(chain):
@@ -932,6 +930,11 @@ def solana_rpc(method, params):
                 time.sleep(wait)
                 _wait_for_rpc_slot()
                 continue
+            if r.status_code == 403:
+                # 403はAPIキー必須RPC → 即次のRPCへ（待機なし）
+                rpc_name = url.split("//")[1].split("/")[0][:20]
+                print(f"[Solana RPC] 403 ({rpc_name}) APIキー必須 → 次のRPCへ")
+                break
             print(f"[Solana RPC] HTTPエラー {r.status_code}: {r.text[:100]}")
         except Exception as e:
             print(f"[Solana RPC] 接続エラー ({method}): {e}")
@@ -1377,11 +1380,7 @@ def process_retry_queue():
                 continue
             known_token_mints.add(mint)
         print(f"[Pump.fun] ✅ リトライ成功！mint → スレッド起動: {mint[:20]}")
-        t = threading.Thread(
-            target=_wrapped_process_solana,
-            args=(mint,),
-            daemon=True,
-        )
+        t = threading.Thread(target=_wrapped_process_solana, args=(mint,), daemon=True)
         t.start()
 
     if still_failed:
