@@ -66,7 +66,6 @@ BASE_BASE_TOKENS = {
     "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
 }
 
-# ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
 CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
 CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
 
@@ -101,7 +100,6 @@ PRICE_CACHE_SEC = 300
 _BSC_KNOWN  = set()
 _BASE_KNOWN = set()
 
-# ── 監視チェーン ──────────────────────────────────────────────────────────────
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
@@ -117,9 +115,6 @@ EVM_CHAINS = [
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        # mainnet.base.org → drpc → publicnode の順
-        # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
-        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
         "rpc_list": [
             "https://mainnet.base.org",
             "https://base.drpc.org",
@@ -164,9 +159,6 @@ EVM_ALL_CHAINS = [
     },
     {
         "name": "Base全般", "emoji": "🔵",
-        # mainnet.base.org → drpc → publicnode の順
-        # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
-        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
         "rpc_list": [
             "https://mainnet.base.org",
             "https://base.drpc.org",
@@ -186,7 +178,6 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-# ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
@@ -1056,12 +1047,22 @@ def get_evm_holder_stats(token_address, chain, from_block):
             return None
         latest = int(latest_hex, 16)
 
-        logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(from_block),
-            "toBlock":   hex(latest),
-            "address":   token_address,
-            "topics":    [TRANSFER_TOPIC],
-        }])
+        # publicnodeなど無料RPCのブロック範囲上限に対応（5000ブロック上限）
+        effective_from = max(from_block, latest - 5000)
+
+        # トークン生成直後でTransferがまだない場合は3秒待ってリトライ
+        logs = None
+        for attempt in range(3):
+            logs = evm_rpc(chain, "eth_getLogs", [{
+                "fromBlock": hex(effective_from),
+                "toBlock":   hex(latest),
+                "address":   token_address,
+                "topics":    [TRANSFER_TOPIC],
+            }])
+            if logs:
+                break
+            if attempt < 2:
+                time.sleep(3)
         if not logs:
             return None
 
@@ -1173,7 +1174,6 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
 
                     time.sleep(POLL_INTERVAL_SEC)
                     continue
-                # pump.fun API失敗 → 以降DexScreener一本化（530連打を防ぐ）
                 effective_pump = False
 
             dex = analyze_dexscreener(mint)
@@ -1534,6 +1534,7 @@ def _process_raydium_token(mint, liq_usd):
                 return
 
             dex = analyze_dexscreener(mint)
+            platform = "Raydium"
             dex_text = _build_dex_text(dex) if dex else f"💧 流動性: ${liq_usd:,.0f}\n\n"
             holder_text, holder_judge = format_holder_output(holder_data)
             msg = (
