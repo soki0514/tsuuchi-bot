@@ -12,11 +12,17 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 
 # ── エンドポイント ────────────────────────────────────────────────────────────
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
-SOLANA_RPC = (
-    f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}"
-    if HELIUS_KEY
-    else "https://api.mainnet-beta.solana.com"
-)
+
+# Solana RPC ラウンドロビンリスト（429対策: 複数RPC分散）
+# Helius(有料/無料10RPS) + Ankr(無料) + Publicnode(無料) で実効帯域を3倍化
+_SOLANA_RPC_LIST = [r for r in [
+    f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}" if HELIUS_KEY else None,
+    "https://rpc.ankr.com/solana",
+    "https://solana.publicnode.com",
+] if r]
+SOLANA_RPC = _SOLANA_RPC_LIST[0]  # 後方互換性のために残す
+_solana_rpc_idx      = 0
+_solana_rpc_idx_lock = threading.Lock()
 
 # ── EVM定数 ──────────────────────────────────────────────────────────────────
 TRANSFER_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -46,7 +52,6 @@ PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
 UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
 PAIR_CREATED_TOPIC      = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 PANCAKE_V2_FACTORY_BSC  = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
-
 V2_MINT_TOPIC = "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f"
 V3_MINT_TOPIC = "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde"
 
@@ -66,6 +71,7 @@ BASE_BASE_TOKENS = {
     "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
 }
 
+# ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
 CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
 CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
 
@@ -100,6 +106,7 @@ PRICE_CACHE_SEC = 300
 _BSC_KNOWN  = set()
 _BASE_KNOWN = set()
 
+# ── 監視チェーン ──────────────────────────────────────────────────────────────
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
@@ -178,15 +185,15 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
 all_solana_last_signature = None
-
 raydium_last_sigs = {RAYDIUM_AMM_V4: None, RAYDIUM_CPMM: None}
-
 _sol_price_cache  = [None, 0.0]
 
+# ── 閾値 ──────────────────────────────────────────────────────────────────────
 LIQUIDITY_MIN       = 10_000
 TOP10_MAX_PCT       = 60.0
 POLL_INTERVAL_SEC   = 3
@@ -194,7 +201,7 @@ MONITOR_TIMEOUT_SEC = 300
 
 KNOWN_MINTS_LOCK = threading.Lock()
 
-_SOLANA_SEMAPHORE = threading.Semaphore(6)
+_SOLANA_SEMAPHORE  = threading.Semaphore(6)
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
 
 _PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
@@ -205,7 +212,10 @@ RETRY_SIG_QUEUE = []
 RETRY_SIG_LOCK  = threading.Lock()
 RETRY_EXPIRY    = 300
 
-_SOLANA_RPS_LIMIT  = 6
+# ── Solana RPCグローバルレート制限 ────────────────────────────────────────────
+# 3本のRPC（Helius/Ankr/Publicnode）にラウンドロビンするため
+# 1本あたり6 RPS × 3本 = 18 RPS を上限とする。
+_SOLANA_RPS_LIMIT  = 18
 _solana_rpc_times  = []
 _solana_rpc_lock   = threading.Lock()
 
@@ -232,6 +242,10 @@ def _wait_for_rpc_slot():
         time.sleep(0.05)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SOL価格
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _get_sol_price_usd():
     global _sol_price_cache
     now = time.time()
@@ -253,6 +267,10 @@ def _get_sol_price_usd():
     return _sol_price_cache[0] if _sol_price_cache[0] else 150.0
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TELEGRAM
+# ══════════════════════════════════════════════════════════════════════════════
+
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
         print("BOT_TOKEN/CHAT_IDが空です")
@@ -272,6 +290,10 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram接続エラー: {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEXSCREENER
+# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_dexscreener(token_address):
     try:
@@ -294,6 +316,10 @@ def analyze_dexscreener(token_address):
         print(f"DexScreenerエラー: {e}")
         return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PUMP.FUN API
+# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_pumpfun_api(mint):
     _pf_headers = {
@@ -335,6 +361,10 @@ def analyze_pumpfun_api(mint):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM RPC
+# ══════════════════════════════════════════════════════════════════════════════
+
 def evm_rpc(chain, method, params):
     rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
     for rpc_url in rpc_list:
@@ -359,6 +389,10 @@ def evm_rpc(chain, method, params):
                     time.sleep(1)
     return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# オンチェーン流動性チェック
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _get_native_price_usd(chain):
     global _native_price_cache
@@ -440,6 +474,10 @@ def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DEX Factory ペアアドレス検索
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _get_v2_pair(token_a, token_b, factory, chain):
     ta   = token_a[2:].lower().zfill(40)
     tb   = token_b[2:].lower().zfill(40)
@@ -470,12 +508,12 @@ def _find_pair_address(token_addr, chain):
     is_bsc = "BSC" in chain["name"] or "BNB" in chain["name"] or "FourMeme" in chain["name"]
 
     if is_bsc:
-        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+        native     = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
         factory_v2 = PANCAKE_V2_FACTORY_BSC
         factory_v3 = PANCAKE_V3_FACTORY_BSC
         v3_fees    = (500, 2500, 10000, 100)
     else:
-        native  = "0x4200000000000000000000000000000000000006"
+        native     = "0x4200000000000000000000000000000000000006"
         factory_v2 = None
         factory_v3 = UNISWAP_V3_FACTORY_BASE
         v3_fees    = (500, 3000, 10000, 100)
@@ -495,6 +533,10 @@ def _find_pair_address(token_addr, chain):
 
     return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Mint イベント監視
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
                               token0, token1, is_v2):
@@ -592,6 +634,10 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
 
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM トークン処理スレッド
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_token(token_address, chain, from_block,
                         pair_addr=None, token0=None, token1=None, is_v2=False):
@@ -693,6 +739,7 @@ def _process_evm_token(token_address, chain, from_block,
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
                 return
 
+        # ── フォールバック: pair_addr なし（FourMeme/Clanker）────────────────────
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
 
@@ -714,6 +761,10 @@ def _process_evm_token(token_address, chain, from_block,
     except Exception as e:
         print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM チェーン監視
+# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
     try:
@@ -768,6 +819,10 @@ def check_evm_chain(chain):
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM 全般監視 (PancakeSwap V2/V3 / Uniswap V3)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_all_chain(chain):
     try:
@@ -852,11 +907,19 @@ def check_evm_all_chain(chain):
         print(f"[{chain['name']}] チェックエラー: {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SOLANA RPC（ラウンドロビン）
+# ══════════════════════════════════════════════════════════════════════════════
+
 def solana_rpc(method, params):
+    global _solana_rpc_idx
     _wait_for_rpc_slot()
     for attempt in range(4):
+        with _solana_rpc_idx_lock:
+            url = _SOLANA_RPC_LIST[_solana_rpc_idx % len(_SOLANA_RPC_LIST)]
+            _solana_rpc_idx += 1
         try:
-            r = requests.post(SOLANA_RPC, json={
+            r = requests.post(url, json={
                 "jsonrpc": "2.0", "id": 1,
                 "method": method, "params": params,
             }, timeout=15)
@@ -864,7 +927,8 @@ def solana_rpc(method, params):
                 return r.json().get("result")
             if r.status_code == 429:
                 wait = 2 ** attempt
-                print(f"[Solana RPC] 429 レート制限 → {wait}秒待機 (attempt {attempt+1}/4)")
+                rpc_name = url.split("//")[1].split("/")[0][:20]
+                print(f"[Solana RPC] 429 ({rpc_name}) → {wait}秒待機 (attempt {attempt+1}/4)")
                 time.sleep(wait)
                 _wait_for_rpc_slot()
                 continue
@@ -1047,10 +1111,8 @@ def get_evm_holder_stats(token_address, chain, from_block):
             return None
         latest = int(latest_hex, 16)
 
-        # publicnodeなど無料RPCのブロック範囲上限に対応（5000ブロック上限）
         effective_from = max(from_block, latest - 5000)
 
-        # トークン生成直後でTransferがまだない場合は3秒待ってリトライ
         logs = None
         for attempt in range(3):
             logs = evm_rpc(chain, "eth_getLogs", [{
@@ -1114,6 +1176,10 @@ def get_evm_holder_stats(token_address, chain, from_block):
         print(f"[{chain['name']}] EVM保有量トップ10取得エラー: {e}")
         return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana トークン処理スレッド
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _process_solana_token(mint, label="Pump.fun", pump_link=True):
     try:
@@ -1227,6 +1293,10 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Pump.fun 監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _handle_pumpfun_sig(sig):
     with _SOLANA_SEMAPHORE:
         mint = parse_new_token(sig)
@@ -1268,6 +1338,10 @@ def check_pumpfun_onchain():
     for sig in sigs:
         _PUMPFUN_POOL.submit(_handle_pumpfun_sig, sig)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pump.fun リトライキュー
+# ══════════════════════════════════════════════════════════════════════════════
 
 def process_retry_queue():
     global known_token_mints
@@ -1316,6 +1390,10 @@ def process_retry_queue():
         print(f"[Pump.fun] リトライ再キュー: {len(still_failed)}件")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana 全般監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def get_new_metadata_transactions():
     global all_solana_last_signature
     all_txns = []
@@ -1362,15 +1440,15 @@ def _get_platform_name(dex):
         return "Unknown"
     dex_id = dex.get("dex_id", "").lower()
     name_map = {
-        "raydium":        "Raydium",
-        "pump-fun":       "pump.fun",
-        "pumpfun":        "pump.fun",
-        "orca":           "Orca",
-        "meteora":        "Meteora",
-        "jupiter":        "Jupiter",
-        "rapidlaunch":    "rapidlaunch.io",
-        "moonshot":       "Moonshot",
-        "letsbonk":       "LetsBonk",
+        "raydium":     "Raydium",
+        "pump-fun":    "pump.fun",
+        "pumpfun":     "pump.fun",
+        "orca":        "Orca",
+        "meteora":     "Meteora",
+        "jupiter":     "Jupiter",
+        "rapidlaunch": "rapidlaunch.io",
+        "moonshot":    "Moonshot",
+        "letsbonk":    "LetsBonk",
     }
     for key, label in name_map.items():
         if key in dex_id:
@@ -1469,6 +1547,10 @@ def solana_all_monitor_loop():
         time.sleep(15)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Raydium直接監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def parse_raydium_new_pool(signature):
     result = None
     for attempt in range(3):
@@ -1534,7 +1616,6 @@ def _process_raydium_token(mint, liq_usd):
                 return
 
             dex = analyze_dexscreener(mint)
-            platform = "Raydium"
             dex_text = _build_dex_text(dex) if dex else f"💧 流動性: ${liq_usd:,.0f}\n\n"
             holder_text, holder_judge = format_holder_output(holder_data)
             msg = (
@@ -1629,6 +1710,10 @@ def raydium_monitor_loop():
         time.sleep(5)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CEX (Bitget) 監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def get_cex_symbols():
     try:
         r = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
@@ -1678,9 +1763,7 @@ def check_cex_listings():
     for symbol in current - known_cex_symbols:
         if symbol.endswith("USDT"):
             base = symbol.replace("USDT", "")
-
             addresses = get_bitget_contract_addresses(base)
-
             addr_text = ""
             if addresses:
                 lines = []
@@ -1700,6 +1783,10 @@ def check_cex_listings():
             print(f"[CEX新規] {symbol} アドレス={len(addresses)}チェーン")
     known_cex_symbols = current
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# メインループ
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     print("通知ボットくん 起動中...")
