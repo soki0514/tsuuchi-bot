@@ -14,7 +14,7 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
 
 # Solana RPC ラウンドロビンリスト（429対策: 複数RPC分散）
-# Helius(10RPS) + Publicnode(無料) + Solana Foundation公式(無料) で分散
+# Helius(有料/無料10RPS) + Ankr(無料) + Publicnode(無料) で実効帯域を3倍化
 _SOLANA_RPC_LIST = [r for r in [
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}" if HELIUS_KEY else None,
     "https://solana.publicnode.com",
@@ -74,7 +74,6 @@ BASE_BASE_TOKENS = {
 # ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
 CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
 CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
-
 STABLE_ADDRS = {
     "0x55d398326f99059ff775485246999027b3197955",
     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
@@ -190,18 +189,20 @@ known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
 all_solana_last_signature = None
+
 raydium_last_sigs = {RAYDIUM_AMM_V4: None, RAYDIUM_CPMM: None}
+
 _sol_price_cache  = [None, 0.0]
 
-# ── 閾値 ──────────────────────────────────────────────────────────────────────
+# ── 閾値ベース通知フィルター ──────────────────────────────────────────────────
 LIQUIDITY_MIN       = 10_000
 TOP10_MAX_PCT       = 60.0
 POLL_INTERVAL_SEC   = 3
-MONITOR_TIMEOUT_SEC = 300
+MONITOR_TIMEOUT_SEC = 180      # 監視タイムアウト（3分）
 
 KNOWN_MINTS_LOCK = threading.Lock()
 
-_SOLANA_SEMAPHORE  = threading.Semaphore(6)
+_SOLANA_SEMAPHORE = threading.Semaphore(6)
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
 
 _PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
@@ -212,7 +213,6 @@ RETRY_SIG_QUEUE = []
 RETRY_SIG_LOCK  = threading.Lock()
 RETRY_EXPIRY    = 300
 
-# ── Solana RPCグローバルレート制限 ────────────────────────────────────────────
 _SOLANA_RPS_LIMIT  = 18
 _solana_rpc_times  = []
 _solana_rpc_lock   = threading.Lock()
@@ -240,10 +240,6 @@ def _wait_for_rpc_slot():
         time.sleep(0.05)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SOL価格
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _get_sol_price_usd():
     global _sol_price_cache
     now = time.time()
@@ -265,10 +261,6 @@ def _get_sol_price_usd():
     return _sol_price_cache[0] if _sol_price_cache[0] else 150.0
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TELEGRAM
-# ══════════════════════════════════════════════════════════════════════════════
-
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
         print("BOT_TOKEN/CHAT_IDが空です")
@@ -288,10 +280,6 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram接続エラー: {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# DEXSCREENER
-# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_dexscreener(token_address):
     try:
@@ -314,10 +302,6 @@ def analyze_dexscreener(token_address):
         print(f"DexScreenerエラー: {e}")
         return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PUMP.FUN API
-# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_pumpfun_api(mint):
     _pf_headers = {
@@ -342,7 +326,6 @@ def analyze_pumpfun_api(mint):
             return None
         data = r.json()
         if not data:
-            print(f"[Pump.fun API] 空レスポンス ({mint[:16]})")
             return None
         usd_market_cap = float(data.get("usd_market_cap") or 0)
         complete       = bool(data.get("complete", False))
@@ -358,10 +341,6 @@ def analyze_pumpfun_api(mint):
         print(f"[Pump.fun API] エラー: {e}")
         return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM RPC
-# ══════════════════════════════════════════════════════════════════════════════
 
 def evm_rpc(chain, method, params):
     rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
@@ -387,10 +366,6 @@ def evm_rpc(chain, method, params):
                     time.sleep(1)
     return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# オンチェーン流動性チェック
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _get_native_price_usd(chain):
     global _native_price_cache
@@ -472,10 +447,6 @@ def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DEX Factory ペアアドレス検索
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _get_v2_pair(token_a, token_b, factory, chain):
     ta   = token_a[2:].lower().zfill(40)
     tb   = token_b[2:].lower().zfill(40)
@@ -506,12 +477,12 @@ def _find_pair_address(token_addr, chain):
     is_bsc = "BSC" in chain["name"] or "BNB" in chain["name"] or "FourMeme" in chain["name"]
 
     if is_bsc:
-        native     = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
         factory_v2 = PANCAKE_V2_FACTORY_BSC
         factory_v3 = PANCAKE_V3_FACTORY_BSC
         v3_fees    = (500, 2500, 10000, 100)
     else:
-        native     = "0x4200000000000000000000000000000000000006"
+        native  = "0x4200000000000000000000000000000000000006"
         factory_v2 = None
         factory_v3 = UNISWAP_V3_FACTORY_BASE
         v3_fees    = (500, 3000, 10000, 100)
@@ -531,10 +502,6 @@ def _find_pair_address(token_addr, chain):
 
     return None
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Mint イベント監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
                               token0, token1, is_v2):
@@ -632,10 +599,6 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
 
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM トークン処理スレッド
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _process_evm_token(token_address, chain, from_block,
                         pair_addr=None, token0=None, token1=None, is_v2=False):
@@ -737,7 +700,6 @@ def _process_evm_token(token_address, chain, from_block,
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
                 return
 
-        # ── フォールバック: pair_addr なし（FourMeme/Clanker）────────────────────
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
 
@@ -759,10 +721,6 @@ def _process_evm_token(token_address, chain, from_block,
     except Exception as e:
         print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM チェーン監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
     try:
@@ -817,10 +775,6 @@ def check_evm_chain(chain):
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM 全般監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_all_chain(chain):
     try:
@@ -905,10 +859,6 @@ def check_evm_all_chain(chain):
         print(f"[{chain['name']}] チェックエラー: {e}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# SOLANA RPC（ラウンドロビン）
-# ══════════════════════════════════════════════════════════════════════════════
-
 def solana_rpc(method, params):
     global _solana_rpc_idx
     _wait_for_rpc_slot()
@@ -931,7 +881,6 @@ def solana_rpc(method, params):
                 _wait_for_rpc_slot()
                 continue
             if r.status_code == 403:
-                # 403はAPIキー必須RPC → 即次のRPCへ（待機なし）
                 rpc_name = url.split("//")[1].split("/")[0][:20]
                 print(f"[Solana RPC] 403 ({rpc_name}) APIキー必須 → 次のRPCへ")
                 break
@@ -1180,10 +1129,6 @@ def get_evm_holder_stats(token_address, chain, from_block):
         return None
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana トークン処理スレッド
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _process_solana_token(mint, label="Pump.fun", pump_link=True):
     try:
         deadline = time.time() + MONITOR_TIMEOUT_SEC
@@ -1290,15 +1235,11 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
 
             time.sleep(POLL_INTERVAL_SEC)
 
-        print(f"[{label}] タイムアウト(5分) → スキップ: {mint[:20]}")
+        print(f"[{label}] タイムアウト(3分) → スキップ: {mint[:20]}")
 
     except Exception as e:
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun 監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _handle_pumpfun_sig(sig):
     with _SOLANA_SEMAPHORE:
@@ -1342,10 +1283,6 @@ def check_pumpfun_onchain():
         _PUMPFUN_POOL.submit(_handle_pumpfun_sig, sig)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Pump.fun リトライキュー
-# ══════════════════════════════════════════════════════════════════════════════
-
 def process_retry_queue():
     global known_token_mints
     now = time.time()
@@ -1380,7 +1317,11 @@ def process_retry_queue():
                 continue
             known_token_mints.add(mint)
         print(f"[Pump.fun] ✅ リトライ成功！mint → スレッド起動: {mint[:20]}")
-        t = threading.Thread(target=_wrapped_process_solana, args=(mint,), daemon=True)
+        t = threading.Thread(
+            target=_wrapped_process_solana,
+            args=(mint,),
+            daemon=True,
+        )
         t.start()
 
     if still_failed:
@@ -1388,10 +1329,6 @@ def process_retry_queue():
             RETRY_SIG_QUEUE.extend(still_failed)
         print(f"[Pump.fun] リトライ再キュー: {len(still_failed)}件")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana 全般監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def get_new_metadata_transactions():
     global all_solana_last_signature
@@ -1439,15 +1376,15 @@ def _get_platform_name(dex):
         return "Unknown"
     dex_id = dex.get("dex_id", "").lower()
     name_map = {
-        "raydium":     "Raydium",
-        "pump-fun":    "pump.fun",
-        "pumpfun":     "pump.fun",
-        "orca":        "Orca",
-        "meteora":     "Meteora",
-        "jupiter":     "Jupiter",
-        "rapidlaunch": "rapidlaunch.io",
-        "moonshot":    "Moonshot",
-        "letsbonk":    "LetsBonk",
+        "raydium":        "Raydium",
+        "pump-fun":       "pump.fun",
+        "pumpfun":        "pump.fun",
+        "orca":           "Orca",
+        "meteora":        "Meteora",
+        "jupiter":        "Jupiter",
+        "rapidlaunch":    "rapidlaunch.io",
+        "moonshot":       "Moonshot",
+        "letsbonk":       "LetsBonk",
     }
     for key, label in name_map.items():
         if key in dex_id:
@@ -1545,10 +1482,6 @@ def solana_all_monitor_loop():
             print(f"[Solana全般] ループエラー: {e}")
         time.sleep(15)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Raydium直接監視
-# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_raydium_new_pool(signature):
     result = None
@@ -1709,10 +1642,6 @@ def raydium_monitor_loop():
         time.sleep(5)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# CEX (Bitget) 監視
-# ══════════════════════════════════════════════════════════════════════════════
-
 def get_cex_symbols():
     try:
         r = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
@@ -1782,10 +1711,6 @@ def check_cex_listings():
             print(f"[CEX新規] {symbol} アドレス={len(addresses)}チェーン")
     known_cex_symbols = current
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# メインループ
-# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     print("通知ボットくん 起動中...")
