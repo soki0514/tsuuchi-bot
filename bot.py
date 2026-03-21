@@ -14,13 +14,12 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
 
 # Solana RPC ラウンドロビンリスト（429対策: 複数RPC分散）
-# Helius(有料/無料10RPS) + Ankr(無料) + Publicnode(無料) で実効帯域を3倍化
 _SOLANA_RPC_LIST = [r for r in [
     f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}" if HELIUS_KEY else None,
     "https://solana.publicnode.com",
     "https://api.mainnet-beta.solana.com",
 ] if r]
-SOLANA_RPC = _SOLANA_RPC_LIST[0]  # 後方互換性のために残す
+SOLANA_RPC = _SOLANA_RPC_LIST[0]
 _solana_rpc_idx      = 0
 _solana_rpc_idx_lock = threading.Lock()
 
@@ -29,10 +28,8 @@ TRANSFER_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df52
 ZERO_TOPIC      = "0x0000000000000000000000000000000000000000000000000000000000000000"
 PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
-# ── Solana全般監視: SPL Token Metadata Program (全launchpad対応) ───────────────
 SPL_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 
-# ── Raydium直接監視定数 ──────────────────────────────────────────────────────
 RAYDIUM_AMM_V4    = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 RAYDIUM_CPMM      = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
 WSOL_MINT         = "So11111111111111111111111111111111111111112"
@@ -46,12 +43,12 @@ SOLANA_BASE_TOKENS = {
     "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
 }
 
-# ── EVM全般監視定数 ────────────────────────────────────────────────────────────
 POOL_CREATED_TOPIC      = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
 UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
 PAIR_CREATED_TOPIC      = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 PANCAKE_V2_FACTORY_BSC  = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+
 V2_MINT_TOPIC = "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f"
 V3_MINT_TOPIC = "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde"
 
@@ -71,9 +68,9 @@ BASE_BASE_TOKENS = {
     "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
 }
 
-# ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
 CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
 CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
+
 STABLE_ADDRS = {
     "0x55d398326f99059ff775485246999027b3197955",
     "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
@@ -105,7 +102,6 @@ PRICE_CACHE_SEC = 300
 _BSC_KNOWN  = set()
 _BASE_KNOWN = set()
 
-# ── 監視チェーン ──────────────────────────────────────────────────────────────
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
@@ -184,7 +180,6 @@ HEADERS = {
     "Accept": "application/json",
 }
 
-# ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
@@ -194,11 +189,11 @@ raydium_last_sigs = {RAYDIUM_AMM_V4: None, RAYDIUM_CPMM: None}
 
 _sol_price_cache  = [None, 0.0]
 
-# ── 閾値ベース通知フィルター ──────────────────────────────────────────────────
 LIQUIDITY_MIN       = 10_000
+EARLY_NOTIFY_MIN    = 1_000
 TOP10_MAX_PCT       = 60.0
 POLL_INTERVAL_SEC   = 3
-MONITOR_TIMEOUT_SEC = 180      # 監視タイムアウト（3分）
+MONITOR_TIMEOUT_SEC = 300
 
 KNOWN_MINTS_LOCK = threading.Lock()
 
@@ -506,8 +501,9 @@ def _find_pair_address(token_addr, chain):
 def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
                               token0, token1, is_v2):
     mint_topic = V2_MINT_TOPIC if is_v2 else V3_MINT_TOPIC
-    deadline          = time.time() + MONITOR_TIMEOUT_SEC
+    deadline           = time.time() + MONITOR_TIMEOUT_SEC
     last_checked_block = from_block
+    early_notified     = False
 
     print(f"[{chain['name']}] Mint監視開始: {pair_addr[:12]} ({token_address[:12]})")
 
@@ -529,18 +525,35 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
         }])
         last_checked_block = latest_int
 
-        if not logs:
-            continue
-
-        print(f"[{chain['name']}] ⚡ Mint検知！即getReserves: {pair_addr[:12]}")
+        if logs:
+            print(f"[{chain['name']}] ⚡ Mint検知！即getReserves: {pair_addr[:12]}")
+        # Mintイベントなしでも流動性を直接チェック（爆上がり検知）
 
         if is_v2:
             liq = _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain)
         else:
             liq = _get_v3_pool_liquidity_usd(pair_addr, token0, token1, chain)
 
-        if liq is None or liq < LIQUIDITY_MIN:
-            print(f"[{chain['name']}] Mint後も流動性不足 ${liq or 0:,.0f} → 監視継続")
+        if liq is None or liq < EARLY_NOTIFY_MIN:
+            continue
+
+        if liq < LIQUIDITY_MIN and not early_notified:
+            early_notified = True
+            print(f"[{chain['name']}] ⚡ 早期流動性検知 ${liq:,.0f} → 早期通知送信")
+            launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
+            early_msg = (
+                f"⚡ <b>[{chain['name']}] 早期流動性検知！</b>\n\n"
+                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"アドレス: <code>{token_address}</code>\n\n"
+                f"💧 流動性: <b>${liq:,.0f}</b>\n"
+                f"⚠️ まだ成長中 / ${LIQUIDITY_MIN:,}到達で詳細通知\n\n"
+                f"📊 {chain['dex_url'].format(token_address)}\n"
+                f"{launch_line}"
+            )
+            send_telegram(early_msg)
+            continue
+
+        if liq < LIQUIDITY_MIN:
             continue
 
         print(f"[{chain['name']}] 流動性OK: ${liq:,.0f} → 保有率チェックへ")
@@ -621,6 +634,19 @@ def _process_evm_token(token_address, chain, from_block,
             print(f"[{chain['name']}] オンチェーン流動性: {liq_str} ({token_address[:12]})")
 
             if liq is None or liq < LIQUIDITY_MIN:
+                if liq and liq >= EARLY_NOTIFY_MIN:
+                    print(f"[{chain['name']}] ⚡ 初期流動性 ${liq:,.0f} → 早期通知送信")
+                    launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
+                    early_msg = (
+                        f"⚡ <b>[{chain['name']}] 早期流動性検知！</b>\n\n"
+                        f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
+                        f"アドレス: <code>{token_address}</code>\n\n"
+                        f"💧 流動性: <b>${liq:,.0f}</b>\n"
+                        f"⚠️ まだ成長中 / ${LIQUIDITY_MIN:,}到達で詳細通知\n\n"
+                        f"📊 {chain['dex_url'].format(token_address)}\n"
+                        f"{launch_line}"
+                    )
+                    send_telegram(early_msg)
                 print(f"[{chain['name']}] オンチェーン流動性不足(${liq or 0:,.0f})"
                       f" → Mint監視へ: {token_address[:12]}")
                 _wait_for_liquidity_mint(
@@ -1235,7 +1261,7 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
 
             time.sleep(POLL_INTERVAL_SEC)
 
-        print(f"[{label}] タイムアウト(3分) → スキップ: {mint[:20]}")
+        print(f"[{label}] タイムアウト(5分) → スキップ: {mint[:20]}")
 
     except Exception as e:
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
