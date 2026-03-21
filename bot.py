@@ -1811,7 +1811,7 @@ def pumpfun_monitor_loop():
             process_retry_queue()
         except Exception as e:
             print(f"[Pump.fun] ループエラー: {e}")
-        time.sleep(10)  # 10秒ごと（TXが溜まらないよう短くする）
+        time.sleep(3)   # 10→3秒（Pump.fun検知速度3倍改善）
 
 
 def solana_all_monitor_loop():
@@ -1836,7 +1836,7 @@ def solana_all_monitor_loop():
             check_all_solana_onchain()
         except Exception as e:
             print(f"[Solana全般] ループエラー: {e}")
-        time.sleep(15)  # 60→15秒（検知速度改善）
+        time.sleep(5)   # 60→15→5秒（Solana全般検知速度改善）
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2167,7 +2167,7 @@ def main():
         for chain in EVM_ALL_CHAINS:
             check_evm_all_chain(chain)  # PairCreated/PoolCreated → オンチェーン即時チェック
 
-        time.sleep(5)  # 30→5秒（EVM新規プール検知を高速化）
+        time.sleep(2)  # 30→5→2秒（EVM新規プール検知を高速化）
         loop += 1
         if loop % 360 == 0:  # 360 × 5秒 = 30分ごとにステータス表示
             evm_status = " ".join(
