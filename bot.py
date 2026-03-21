@@ -232,14 +232,6 @@ TOP10_MAX_PCT       = 60.0     # トップ10保有率上限（%）: これ超え
 POLL_INTERVAL_SEC   = 3        # DexScreenerポーリング間隔（秒）: 10→3秒
 MONITOR_TIMEOUT_SEC = 300      # 監視タイムアウト（5分）: 未達成はスキップ
 
-# ── Rug監視: 通知済みEVMトークンを2時間追跡 ─────────────────────────────────
-_rug_watch      = {}   # token_addr → info dict
-_rug_watch_lock = threading.Lock()
-
-# ── Rug監視: 通知済みSolanaトークンを2時間追跡 ───────────────────────────────
-_sol_rug_watch      = {}   # mint → info dict
-_sol_rug_watch_lock = threading.Lock()
-
 # ── スレッドセーフ: known_token_mintsの競合書き込み防止 ─────────────────────
 # pump.fun（バックグラウンド）とSolana全般（バックグラウンド）が同時に
 # 同一mintを検知して二重通知するのを防ぐ
@@ -781,8 +773,6 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
         )
         send_telegram(msg)
         print(f"[{chain['name']}] ✅ Mint検知→即通知: {token_address[:16]}")
-        # Rug監視リストに登録（流動性急減・LP burn・開発者売りを2時間追跡）
-        _register_rug_watch(token_address, pair_addr, chain, token0, token1, is_v2, from_block)
         return
 
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
@@ -878,7 +868,6 @@ def _process_evm_token(token_address, chain, from_block,
                     )
                     send_telegram(msg)
                     print(f"[{chain['name']}] ✅ 通知送信完了（保有率なし）: {token_address[:16]}")
-                    _register_rug_watch(token_address, pair_addr, chain, token0, token1, is_v2, from_block)
                     return
 
                 top10 = holder_data["top10_ratio"]
@@ -908,7 +897,6 @@ def _process_evm_token(token_address, chain, from_block,
                 )
                 send_telegram(msg)
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
-                _register_rug_watch(token_address, pair_addr, chain, token0, token1, is_v2, from_block)
                 return
 
         # ── フォールバック: Factory直接クエリ → Mint監視（pair_addr なし）────────
@@ -1423,325 +1411,6 @@ def get_evm_holder_stats(token_address, chain, from_block):
 
 
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Rug検知: 通知済みEVMトークンを2時間追跡
-# ①流動性30%以上急減アラート ②LP Burn検知 ③開発者ウォレット売り検知
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _get_dev_wallet_evm(token_address, chain, from_block):
-    """
-    Transfer(from=0x0)イベントから開発者ウォレット（最初のmint受取人）を特定。
-    """
-    try:
-        effective_from = max(from_block - 200, 0)
-        logs = evm_rpc(chain, "eth_getLogs", [{
-            "fromBlock": hex(effective_from),
-            "toBlock":   hex(from_block + 50),
-            "address":   token_address,
-            "topics":    [TRANSFER_TOPIC, ZERO_TOPIC],  # from=0x0 = mintイベント
-        }])
-        if logs:
-            topics = logs[0].get("topics", [])
-            if len(topics) >= 3:
-                dev = "0x" + topics[2][-40:].lower()
-                print(f"[RugWatch] 開発者ウォレット特定: {dev[:12]}...")
-                return dev
-    except Exception as e:
-        print(f"[RugWatch] 開発者ウォレット取得エラー: {e}")
-    return None
-
-
-def _register_rug_watch(token_address, pair_addr, chain, token0, token1, is_v2, from_block):
-    """
-    通知済みEVMトークンをRug監視リストに追加。
-    pair_addrがない場合（FourMeme/Clankerフォールバック）はスキップ。
-    """
-    if not pair_addr:
-        return
-    dev_wallet = _get_dev_wallet_evm(token_address, chain, from_block)
-    with _rug_watch_lock:
-        _rug_watch[token_address.lower()] = {
-            "pair_addr":        pair_addr,
-            "chain":            chain,
-            "token0":           token0,
-            "token1":           token1,
-            "is_v2":            is_v2,
-            "dev_wallet":       dev_wallet,
-            "peak_liq":         0.0,
-            "last_liq":         0.0,
-            "notified_at":      time.time(),
-            "liq_drop_alerted": False,
-            "lp_burn_alerted":  False,
-            "dev_sell_alerted": False,
-            "last_block_lp":    None,
-            "last_block_dev":   None,
-        }
-    print(f"[RugWatch] 監視開始: {token_address[:12]} "
-          f"dev={dev_wallet[:12] if dev_wallet else 'None'}")
-
-
-def _check_rug_signals(token_address, info):
-    """
-    通知済みトークンのRugシグナルを1回チェック。
-    rug_watch_loopから10秒ごとに呼ばれる。
-    """
-    chain     = info["chain"]
-    pair_addr = info["pair_addr"]
-    token0    = info["token0"]
-    token1    = info["token1"]
-    is_v2     = info["is_v2"]
-    dex_url   = chain["dex_url"].format(token_address)
-
-    # ── ①流動性チェック（30%以上急減でアラート）──────────────────────────────
-    if is_v2:
-        curr_liq = _get_v2_pair_liquidity_usd(pair_addr, token0, token1, chain)
-    else:
-        curr_liq = _get_v3_pool_liquidity_usd(pair_addr, token0, token1, chain)
-
-    if curr_liq is not None:
-        if curr_liq > info["peak_liq"]:
-            info["peak_liq"] = curr_liq
-        info["last_liq"] = curr_liq
-
-        peak = info["peak_liq"]
-        if not info["liq_drop_alerted"] and peak >= LIQUIDITY_MIN:
-            drop_pct = (peak - curr_liq) / peak * 100 if peak > 0 else 0
-            if drop_pct >= 30:
-                info["liq_drop_alerted"] = True
-                send_telegram(
-                    f"⚠️ <b>流動性急減アラート！</b>\n\n"
-                    f"🪙 <code>{token_address}</code>\n"
-                    f"💧 流動性: ${peak:,.0f} → ${curr_liq:,.0f}\n"
-                    f"📉 下落率: <b>{drop_pct:.0f}%</b>\n\n"
-                    f"⚡ 利確を検討してください\n"
-                    f"📊 {dex_url}"
-                )
-                print(f"[RugWatch] ⚠️ 流動性急減通知: {token_address[:12]} -{drop_pct:.0f}%")
-
-    # ── ②LP Burn検知（V2のみ: pair_addrのTransfer→0x0）────────────────────────
-    if is_v2 and not info["lp_burn_alerted"]:
-        latest_hex = evm_rpc(chain, "eth_blockNumber", [])
-        if latest_hex:
-            latest   = int(latest_hex, 16)
-            from_blk = info["last_block_lp"] or (latest - 20)
-            if latest > from_blk:
-                # LP tokenをゼロアドレスへ送信 = LP burn = 流動性引き出し準備
-                burn_logs = evm_rpc(chain, "eth_getLogs", [{
-                    "fromBlock": hex(from_blk + 1),
-                    "toBlock":   hex(latest),
-                    "address":   pair_addr,
-                    "topics":    [TRANSFER_TOPIC, None, ZERO_TOPIC],  # to=0x0
-                }])
-                info["last_block_lp"] = latest
-                if burn_logs:
-                    info["lp_burn_alerted"] = True
-                    send_telegram(
-                        f"🚨 <b>LP Burn検知！Rug警戒！</b>\n\n"
-                        f"🪙 <code>{token_address}</code>\n"
-                        f"流動性引き出しを検知しました\n\n"
-                        f"🔴 <b>即売却を強く推奨</b>\n"
-                        f"📊 {dex_url}"
-                    )
-                    print(f"[RugWatch] 🚨 LP Burn通知: {token_address[:12]}")
-
-    # ── ③開発者ウォレット売り検知 ───────────────────────────────────────────────
-    dev = info.get("dev_wallet")
-    if dev and not info["dev_sell_alerted"]:
-        latest_hex = evm_rpc(chain, "eth_blockNumber", [])
-        if latest_hex:
-            latest   = int(latest_hex, 16)
-            from_blk = info["last_block_dev"] or (latest - 20)
-            if latest > from_blk:
-                # 開発者ウォレットからのTransferを検知（売り）
-                dev_topic = "0x000000000000000000000000" + dev[2:].lower().zfill(40)
-                dev_logs  = evm_rpc(chain, "eth_getLogs", [{
-                    "fromBlock": hex(from_blk + 1),
-                    "toBlock":   hex(latest),
-                    "address":   token_address,
-                    "topics":    [TRANSFER_TOPIC, dev_topic],  # from=dev
-                }])
-                info["last_block_dev"] = latest
-                if dev_logs:
-                    info["dev_sell_alerted"] = True
-                    short_dev = dev[:6] + "..." + dev[-4:]
-                    send_telegram(
-                        f"👀 <b>開発者ウォレット動き検知！</b>\n\n"
-                        f"🪙 <code>{token_address}</code>\n"
-                        f"👛 開発者: {short_dev}\n"
-                        f"トークン売却を検知しました\n\n"
-                        f"⚠️ 要注意 – 利確を検討してください\n"
-                        f"📊 {dex_url}"
-                    )
-                    print(f"[RugWatch] 👀 開発者売り通知: {token_address[:12]}")
-
-
-def rug_watch_loop():
-    """
-    通知済みEVMトークンを10秒ごとに監視するバックグラウンドループ。
-    ①流動性30%以上急減 ②LP Burn ③開発者売り を検知→即Telegram通知。
-    登録から2時間後に自動削除。
-    """
-    print("[RugWatch] 監視ループ開始")
-    while True:
-        try:
-            now = time.time()
-            with _rug_watch_lock:
-                # 2時間以上前に通知したものを削除
-                expired = [k for k, v in _rug_watch.items()
-                           if now - v["notified_at"] > 7200]
-                for k in expired:
-                    print(f"[RugWatch] 期限切れ削除: {k[:12]}")
-                    del _rug_watch[k]
-                tokens_copy = dict(_rug_watch)
-
-            for token_address, info in tokens_copy.items():
-                try:
-                    _check_rug_signals(token_address, info)
-                except Exception as e:
-                    print(f"[RugWatch] チェックエラー ({token_address[:12]}): {e}")
-
-        except Exception as e:
-            print(f"[RugWatch] ループエラー: {e}")
-        time.sleep(10)  # 10秒ごとにチェック
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Solana Rug検知: 通知済みSolanaトークンを2時間追跡
-# ①流動性30%以上急減アラート ②大口保有者売り検知
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _register_sol_rug_watch(mint, holder_data):
-    """
-    通知済みSolanaトークンをRug監視リストに追加。
-    """
-    with _sol_rug_watch_lock:
-        _sol_rug_watch[mint] = {
-            "notified_at":          time.time(),
-            "peak_liq":             0.0,
-            "last_liq":             0.0,
-            "liq_drop_alerted":     False,
-            "dev_sell_alerted":     False,
-            "initial_top_accounts": None,   # 初回チェック時にスナップショット保存
-        }
-    print(f"[SolRugWatch] 監視開始: {mint[:20]}")
-
-
-def _check_sol_rug_signals(mint, info):
-    """
-    通知済みSolanaトークンのRugシグナルを1回チェック。
-    sol_rug_watch_loopから15秒ごとに呼ばれる。
-    """
-    dex_url = f"https://dexscreener.com/solana/{mint}"
-
-    # ── ①流動性急減チェック（DexScreener）──────────────────────────────────
-    dex = analyze_dexscreener(mint)
-    if dex:
-        curr_liq = dex["liquidity"]
-        if curr_liq > info["peak_liq"]:
-            info["peak_liq"] = curr_liq
-        info["last_liq"] = curr_liq
-
-        peak = info["peak_liq"]
-        if not info["liq_drop_alerted"] and peak >= LIQUIDITY_MIN:
-            drop_pct = (peak - curr_liq) / peak * 100 if peak > 0 else 0
-            if drop_pct >= 30:
-                info["liq_drop_alerted"] = True
-                send_telegram(
-                    f"⚠️ <b>流動性急減アラート！</b>\n\n"
-                    f"🪙 <code>{mint}</code>\n"
-                    f"💧 流動性: ${peak:,.0f} → ${curr_liq:,.0f}\n"
-                    f"📉 下落率: <b>{drop_pct:.0f}%</b>\n\n"
-                    f"⚡ 利確を検討してください\n"
-                    f"📊 {dex_url}"
-                )
-                print(f"[SolRugWatch] ⚠️ 流動性急減通知: {mint[:20]} -{drop_pct:.0f}%")
-
-    # ── ②大口保有者売り検知（getTokenLargestAccounts比較）───────────────────
-    if not info["dev_sell_alerted"]:
-        supply_result  = solana_rpc("getTokenSupply", [mint])
-        holders_result = solana_rpc("getTokenLargestAccounts", [mint])
-        if not supply_result or not holders_result:
-            return
-
-        total    = float(supply_result["value"]["amount"])
-        accounts = holders_result["value"][:10]
-        if total == 0 or not accounts:
-            return
-
-        # 初回: スナップショットを保存して終了
-        if info["initial_top_accounts"] is None:
-            info["initial_top_accounts"] = [
-                {"address": a["address"], "amount": float(a["amount"])}
-                for a in accounts
-            ]
-            return
-
-        # 2回目以降: トップ保有者（=開発者）の変化を比較
-        initial    = info["initial_top_accounts"]
-        top_addr   = initial[0]["address"]
-        top_amt    = initial[0]["amount"]
-        curr_map   = {a["address"]: float(a["amount"]) for a in accounts}
-        short_addr = top_addr[:6] + "..." + top_addr[-4:]
-
-        if top_addr not in curr_map:
-            # トップ10から完全消失 = 大量売り
-            info["dev_sell_alerted"] = True
-            send_telegram(
-                f"👀 <b>大口保有者が売り抜けた！</b>\n\n"
-                f"🪙 <code>{mint}</code>\n"
-                f"👛 アドレス: {short_addr}\n"
-                f"トップ10から消失（全売り）\n\n"
-                f"🔴 <b>即売却を強く推奨</b>\n"
-                f"📊 {dex_url}"
-            )
-            print(f"[SolRugWatch] 👀 大口消失通知: {mint[:20]}")
-
-        elif top_amt > 0:
-            drop_pct = (top_amt - curr_map[top_addr]) / top_amt * 100
-            if drop_pct >= 20:
-                # 20%以上売った
-                info["dev_sell_alerted"] = True
-                send_telegram(
-                    f"👀 <b>大口保有者売り検知！</b>\n\n"
-                    f"🪙 <code>{mint}</code>\n"
-                    f"👛 アドレス: {short_addr}\n"
-                    f"保有量: <b>{drop_pct:.0f}%減少</b>\n\n"
-                    f"⚠️ 要注意 – 利確を検討してください\n"
-                    f"📊 {dex_url}"
-                )
-                print(f"[SolRugWatch] 👀 大口売り通知: {mint[:20]} -{drop_pct:.0f}%")
-
-
-def sol_rug_watch_loop():
-    """
-    通知済みSolanaトークンを15秒ごとに監視するバックグラウンドループ。
-    ①流動性30%以上急減 ②大口保有者売り を検知→即Telegram通知。
-    登録から2時間後に自動削除。
-    """
-    print("[SolRugWatch] 監視ループ開始")
-    while True:
-        try:
-            now = time.time()
-            with _sol_rug_watch_lock:
-                expired = [k for k, v in _sol_rug_watch.items()
-                           if now - v["notified_at"] > 7200]
-                for k in expired:
-                    print(f"[SolRugWatch] 期限切れ削除: {k[:20]}")
-                    del _sol_rug_watch[k]
-                tokens_copy = dict(_sol_rug_watch)
-
-            for mint, info in tokens_copy.items():
-                try:
-                    _check_sol_rug_signals(mint, info)
-                except Exception as e:
-                    print(f"[SolRugWatch] チェックエラー ({mint[:20]}): {e}")
-
-        except Exception as e:
-            print(f"[SolRugWatch] ループエラー: {e}")
-        time.sleep(15)  # 15秒ごとにチェック
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Solana トークン処理スレッド（閾値ベース: 流動性$50k+ かつ トップ10≤60%）
 # pump.fun / Solana全般 共通
@@ -1814,8 +1483,6 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                         )
                         send_telegram(msg)
                         print(f"[{label}] ✅ pump.fun API経由で通知: {mint[:20]}")
-                        # Rug監視リストに登録（流動性急減・大口売りを2時間追跡）
-                        _register_sol_rug_watch(mint, holder_data)
                         return
 
                     time.sleep(POLL_INTERVAL_SEC)
@@ -1865,8 +1532,6 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                 )
                 send_telegram(msg)
                 print(f"[{label}] ✅ 通知送信完了: {mint[:20]}")
-                # Rug監視リストに登録（流動性急減・大口売りを2時間追跡）
-                _register_sol_rug_watch(mint, holder_data)
                 return
 
             time.sleep(POLL_INTERVAL_SEC)
@@ -2273,8 +1938,6 @@ def _process_raydium_token(mint, liq_usd):
             )
             send_telegram(msg)
             print(f"[Raydium] ✅ 即通知完了: {mint[:20]}")
-            # Rug監視リストに登録（流動性急減・大口売りを2時間追跡）
-            _register_sol_rug_watch(mint, holder_data)
         else:
             # 流動性不足 → DexScreener ポーリング（タイムアウト5分）
             print(f"[Raydium] 流動性不足 ${liq_usd:,.0f} → DexScreener監視: {mint[:20]}")
@@ -2473,24 +2136,10 @@ def main():
         f"👛 トップ10保有率 ≤{TOP10_MAX_PCT:.0f}%\n"
         f"🔄 EVM検知5秒毎 / 通知まで平均10〜15秒\n"
         f"⚡ Raydium: プール作成TX直接検知 5〜15秒\n\n"
-        f"🛡 Rug検知機能（EVM + Solana）:\n"
-        f"  ⚠️ 流動性30%以上急減アラート\n"
-        f"  🚨 LP Burn（流動性引き出し）検知 ※EVM\n"
-        f"  👀 大口保有者売り検知\n\n"
         "🔍 Solana監視対象：\n"
         "pump.fun / Raydium / rapidlaunch.io\n"
         "moonshot / letsbonk / その他全Solana launchpad"
     )
-
-    # EVM Rug監視ループを独立バックグラウンドスレッドで起動（10秒ごと）
-    t_rug = threading.Thread(target=rug_watch_loop, daemon=True)
-    t_rug.start()
-    print("[RugWatch] バックグラウンドスレッド起動完了")
-
-    # Solana Rug監視ループを独立バックグラウンドスレッドで起動（15秒ごと）
-    t_sol_rug = threading.Thread(target=sol_rug_watch_loop, daemon=True)
-    t_sol_rug.start()
-    print("[SolRugWatch] バックグラウンドスレッド起動完了")
 
     # Pump.fun監視を独立バックグラウンドスレッドで起動（TX上限なし・10秒ごと）
     t_pumpfun = threading.Thread(target=pumpfun_monitor_loop, daemon=True)
