@@ -30,6 +30,7 @@ PUMPFUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 
 SPL_METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
 
+# ── Raydium直接監視定数 ──────────────────────────────────────────────────────
 RAYDIUM_AMM_V4    = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 RAYDIUM_CPMM      = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
 WSOL_MINT         = "So11111111111111111111111111111111111111112"
@@ -43,6 +44,7 @@ SOLANA_BASE_TOKENS = {
     "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj",
 }
 
+# ── EVM全般監視定数 ────────────────────────────────────────────────────────────
 POOL_CREATED_TOPIC      = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 PANCAKE_V3_FACTORY_BSC  = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
 UNISWAP_V3_FACTORY_BASE = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
@@ -53,21 +55,22 @@ V2_MINT_TOPIC = "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821
 V3_MINT_TOPIC = "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde"
 
 BSC_BASE_TOKENS = {
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
-    "0x55d398326f99059ff775485246999027b3197955",
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
-    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
+    "0x55d398326f99059ff775485246999027b3197955",  # USDT (BSC)
+    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC (BSC)
+    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH (BSC)
+    "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",  # DAI (BSC)
 }
 BASE_BASE_TOKENS = {
-    "0x4200000000000000000000000000000000000006",
-    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
-    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
-    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
+    "0x4200000000000000000000000000000000000006",  # WETH
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC (Base)
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",  # DAI (Base)
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",  # USDbC
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",  # cbETH
 }
 
+# ── オンチェーン流動性チェック用定数 ─────────────────────────────────────────
 CHAINLINK_BNB_USD  = "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
 CHAINLINK_ETH_USD  = "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
 
@@ -102,6 +105,7 @@ PRICE_CACHE_SEC = 300
 _BSC_KNOWN  = set()
 _BASE_KNOWN = set()
 
+# ── 監視チェーン ──────────────────────────────────────────────────────────────
 EVM_CHAINS = [
     {
         "name": "FourMeme/BSC", "emoji": "🟡",
@@ -180,6 +184,7 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+# ── グローバル状態 ────────────────────────────────────────────────────────────
 known_cex_symbols = set()
 known_token_mints = set()
 last_signature    = None
@@ -189,15 +194,15 @@ raydium_last_sigs = {RAYDIUM_AMM_V4: None, RAYDIUM_CPMM: None}
 
 _sol_price_cache  = [None, 0.0]
 
-LIQUIDITY_MIN       = 10_000
-EARLY_NOTIFY_MIN    = 1_000
-TOP10_MAX_PCT       = 60.0
-POLL_INTERVAL_SEC   = 3
-MONITOR_TIMEOUT_SEC = 300
+# ── 閾値ベース通知フィルター ──────────────────────────────────────────────────
+LIQUIDITY_MIN       = 10_000   # 流動性閾値（USD）: これ以上で通知候補
+TOP10_MAX_PCT       = 60.0     # トップ10保有率上限（%）: これ超えでスキップ
+POLL_INTERVAL_SEC   = 3        # ポーリング間隔（秒）
+MONITOR_TIMEOUT_SEC = 300      # 監視タイムアウト（5分）
 
 KNOWN_MINTS_LOCK = threading.Lock()
 
-_SOLANA_SEMAPHORE = threading.Semaphore(6)
+_SOLANA_SEMAPHORE  = threading.Semaphore(6)
 _MONITOR_SEMAPHORE = threading.Semaphore(50)
 
 _PUMPFUN_POOL    = ThreadPoolExecutor(max_workers=8, thread_name_prefix="pumpfun")
@@ -235,6 +240,10 @@ def _wait_for_rpc_slot():
         time.sleep(0.05)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana SOL価格取得（Jupiter Price API）
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _get_sol_price_usd():
     global _sol_price_cache
     now = time.time()
@@ -256,6 +265,10 @@ def _get_sol_price_usd():
     return _sol_price_cache[0] if _sol_price_cache[0] else 150.0
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# TELEGRAM
+# ══════════════════════════════════════════════════════════════════════════════
+
 def send_telegram(message):
     if not BOT_TOKEN or not CHAT_ID:
         print("BOT_TOKEN/CHAT_IDが空です")
@@ -275,6 +288,10 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram接続エラー: {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DEXSCREENER
+# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_dexscreener(token_address):
     try:
@@ -297,6 +314,10 @@ def analyze_dexscreener(token_address):
         print(f"DexScreenerエラー: {e}")
         return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PUMP.FUN 独自API
+# ══════════════════════════════════════════════════════════════════════════════
 
 def analyze_pumpfun_api(mint):
     _pf_headers = {
@@ -337,6 +358,10 @@ def analyze_pumpfun_api(mint):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM RPC
+# ══════════════════════════════════════════════════════════════════════════════
+
 def evm_rpc(chain, method, params):
     rpc_list = chain.get("rpc_list") or [chain.get("rpc", "")]
     for rpc_url in rpc_list:
@@ -361,6 +386,10 @@ def evm_rpc(chain, method, params):
                     time.sleep(1)
     return None
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# オンチェーン流動性チェック
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _get_native_price_usd(chain):
     global _native_price_cache
@@ -442,6 +471,10 @@ def _get_v3_pool_liquidity_usd(pool_addr, token0, token1, chain):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DEX Factory ペアアドレス検索
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _get_v2_pair(token_a, token_b, factory, chain):
     ta   = token_a[2:].lower().zfill(40)
     tb   = token_b[2:].lower().zfill(40)
@@ -472,12 +505,12 @@ def _find_pair_address(token_addr, chain):
     is_bsc = "BSC" in chain["name"] or "BNB" in chain["name"] or "FourMeme" in chain["name"]
 
     if is_bsc:
-        native  = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+        native     = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
         factory_v2 = PANCAKE_V2_FACTORY_BSC
         factory_v3 = PANCAKE_V3_FACTORY_BSC
         v3_fees    = (500, 2500, 10000, 100)
     else:
-        native  = "0x4200000000000000000000000000000000000006"
+        native     = "0x4200000000000000000000000000000000000006"
         factory_v2 = None
         factory_v3 = UNISWAP_V3_FACTORY_BASE
         v3_fees    = (500, 3000, 10000, 100)
@@ -498,12 +531,15 @@ def _find_pair_address(token_addr, chain):
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Mint イベント監視（流動性追加を直接検知）
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
                               token0, token1, is_v2):
     mint_topic = V2_MINT_TOPIC if is_v2 else V3_MINT_TOPIC
     deadline           = time.time() + MONITOR_TIMEOUT_SEC
     last_checked_block = from_block
-    early_notified     = False
 
     print(f"[{chain['name']}] Mint監視開始: {pair_addr[:12]} ({token_address[:12]})")
 
@@ -534,27 +570,8 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
         else:
             liq = _get_v3_pool_liquidity_usd(pair_addr, token0, token1, chain)
 
-        if liq is None or liq < EARLY_NOTIFY_MIN:
-            continue
-
-        if liq < LIQUIDITY_MIN and not early_notified:
-            early_notified = True
-            print(f"[{chain['name']}] ⚡ 早期流動性検知 ${liq:,.0f} → 早期通知送信")
-            launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
-            early_msg = (
-                f"⚡ <b>[{chain['name']}] 早期流動性検知！</b>\n\n"
-                f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"アドレス: <code>{token_address}</code>\n\n"
-                f"💧 流動性: <b>${liq:,.0f}</b>\n"
-                f"⚠️ まだ成長中 / ${LIQUIDITY_MIN:,}到達で詳細通知\n\n"
-                f"📊 {chain['dex_url'].format(token_address)}\n"
-                f"{launch_line}"
-            )
-            send_telegram(early_msg)
-            continue
-
-        if liq < LIQUIDITY_MIN:
-            continue
+        if liq is None or liq < LIQUIDITY_MIN:
+            continue  # $10,000未満 → 監視継続
 
         print(f"[{chain['name']}] 流動性OK: ${liq:,.0f} → 保有率チェックへ")
 
@@ -613,6 +630,10 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
     print(f"[{chain['name']}] Mint監視タイムアウト → スキップ: {pair_addr[:12]}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM トークン処理スレッド
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _process_evm_token(token_address, chain, from_block,
                         pair_addr=None, token0=None, token1=None, is_v2=False):
     try:
@@ -634,19 +655,6 @@ def _process_evm_token(token_address, chain, from_block,
             print(f"[{chain['name']}] オンチェーン流動性: {liq_str} ({token_address[:12]})")
 
             if liq is None or liq < LIQUIDITY_MIN:
-                if liq and liq >= EARLY_NOTIFY_MIN:
-                    print(f"[{chain['name']}] ⚡ 初期流動性 ${liq:,.0f} → 早期通知送信")
-                    launch_line = f"🔗 {chain['launch_url']}\n" if chain.get("launch_url") else ""
-                    early_msg = (
-                        f"⚡ <b>[{chain['name']}] 早期流動性検知！</b>\n\n"
-                        f"時刻: {datetime.now().strftime('%H:%M:%S')}\n"
-                        f"アドレス: <code>{token_address}</code>\n\n"
-                        f"💧 流動性: <b>${liq:,.0f}</b>\n"
-                        f"⚠️ まだ成長中 / ${LIQUIDITY_MIN:,}到達で詳細通知\n\n"
-                        f"📊 {chain['dex_url'].format(token_address)}\n"
-                        f"{launch_line}"
-                    )
-                    send_telegram(early_msg)
                 print(f"[{chain['name']}] オンチェーン流動性不足(${liq or 0:,.0f})"
                       f" → Mint監視へ: {token_address[:12]}")
                 _wait_for_liquidity_mint(
@@ -726,6 +734,7 @@ def _process_evm_token(token_address, chain, from_block,
                 print(f"[{chain['name']}] ✅ 通知送信完了: {token_address[:16]}")
                 return
 
+        # フォールバック: Factory直接クエリ → Mint監視
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
 
@@ -747,6 +756,10 @@ def _process_evm_token(token_address, chain, from_block,
     except Exception as e:
         print(f"[{chain['name']}] スレッドエラー ({token_address[:16]}): {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM チェーン監視
+# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_chain(chain):
     try:
@@ -801,6 +814,10 @@ def check_evm_chain(chain):
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EVM 全般監視 (PancakeSwap V2/V3 / Uniswap V3)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def check_evm_all_chain(chain):
     try:
@@ -884,6 +901,10 @@ def check_evm_all_chain(chain):
     except Exception as e:
         print(f"[{chain['name']}] チェックエラー: {e}")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SOLANA RPC
+# ══════════════════════════════════════════════════════════════════════════════
 
 def solana_rpc(method, params):
     global _solana_rpc_idx
@@ -1155,6 +1176,10 @@ def get_evm_holder_stats(token_address, chain, from_block):
         return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana トークン処理スレッド
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _process_solana_token(mint, label="Pump.fun", pump_link=True):
     try:
         deadline = time.time() + MONITOR_TIMEOUT_SEC
@@ -1267,6 +1292,10 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
         print(f"[{label}] スレッドエラー ({mint[:20]}): {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Pump.fun 監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _handle_pumpfun_sig(sig):
     with _SOLANA_SEMAPHORE:
         mint = parse_new_token(sig)
@@ -1308,6 +1337,10 @@ def check_pumpfun_onchain():
     for sig in sigs:
         _PUMPFUN_POOL.submit(_handle_pumpfun_sig, sig)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pump.fun リトライキュー処理
+# ══════════════════════════════════════════════════════════════════════════════
 
 def process_retry_queue():
     global known_token_mints
@@ -1355,6 +1388,10 @@ def process_retry_queue():
             RETRY_SIG_QUEUE.extend(still_failed)
         print(f"[Pump.fun] リトライ再キュー: {len(still_failed)}件")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Solana 全般監視 (Token Metadata Program)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def get_new_metadata_transactions():
     global all_solana_last_signature
@@ -1508,6 +1545,10 @@ def solana_all_monitor_loop():
             print(f"[Solana全般] ループエラー: {e}")
         time.sleep(15)
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Raydium直接監視
+# ══════════════════════════════════════════════════════════════════════════════
 
 def parse_raydium_new_pool(signature):
     result = None
@@ -1668,6 +1709,10 @@ def raydium_monitor_loop():
         time.sleep(5)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CEX (Bitget) 監視
+# ══════════════════════════════════════════════════════════════════════════════
+
 def get_cex_symbols():
     try:
         r = requests.get(BITGET_SYMBOLS_URL, headers=HEADERS, timeout=10)
@@ -1717,7 +1762,9 @@ def check_cex_listings():
     for symbol in current - known_cex_symbols:
         if symbol.endswith("USDT"):
             base = symbol.replace("USDT", "")
+
             addresses = get_bitget_contract_addresses(base)
+
             addr_text = ""
             if addresses:
                 lines = []
@@ -1737,6 +1784,10 @@ def check_cex_listings():
             print(f"[CEX新規] {symbol} アドレス={len(addresses)}チェーン")
     known_cex_symbols = current
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# メインループ
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     print("通知ボットくん 起動中...")
