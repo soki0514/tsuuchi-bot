@@ -2359,10 +2359,6 @@ def pending_watch_loop():
                     _notify_delayed_launch(key, info["chain"], liq, age, info["source"], dex)
 
                 time.sleep(0.3)
-# ══════════════════════════════════════════════════════════════════════════════
-# EVM トークン処理スレッド（続き: pair_addr なし・フォールバック）
-# ══════════════════════════════════════════════════════════════════════════════
-
         # フォールバック: Factory直接クエリ → Mint監視（pair_addr なし）
         deadline = time.time() + MONITOR_TIMEOUT_SEC
         print(f"[{chain['name']}] Factoryペア検索開始: {token_address[:16]}")
