@@ -15,15 +15,15 @@ HELIUS_KEY = os.environ.get('HELIUS_API_KEY', '')
 BITGET_SYMBOLS_URL  = "https://api.bitget.com/api/v2/spot/public/symbols"
 
 # Solana RPC ラウンドロビンリスト（429対策: 複数RPC分散）
-# Helius(有料/無料10RPS) + Publicnode(無料×2) で実効帯域を分散
+# Publicnode(無料×2) のみ使用
 # ※除外済み: rpc.ankr.com/solana(403), go.getblock.io(404),
 #            solana.drpc.org(521 Cloudflareダウン), endpoints.omniatech.io(400 freetier不可)
 #            api.mainnet-beta.solana.com(429多発・無料枠制限が厳しいため除外)
-_SOLANA_RPC_LIST = [r for r in [
-    f"https://mainnet.helius-rpc.com/?api-key={HELIUS_KEY}" if HELIUS_KEY else None,
+#            mainnet.helius-rpc.com(RailwayのIPに対してfree tier制限が厳しく429多発のため除外)
+_SOLANA_RPC_LIST = [
     "https://solana.publicnode.com",
     "https://solana-rpc.publicnode.com",
-] if r]
+]
 SOLANA_RPC = _SOLANA_RPC_LIST[0]  # 後方互換性のために残す
 _solana_rpc_idx      = 0
 _solana_rpc_idx_lock = threading.Lock()
@@ -304,12 +304,12 @@ RETRY_SIG_QUEUE = []               # [(signature, enqueued_time), ...]
 RETRY_SIG_LOCK  = threading.Lock()
 RETRY_EXPIRY    = 300              # 秒: 5分
 
-# ── Solana RPCグローバルレート制限（5 RPS）────────────────────────────────────
+# ── Solana RPCグローバルレート制限（4 RPS）────────────────────────────────────
 # 全スレッド合計で1秒間に呼べるSolana RPC数の上限。
-# 利用RPC: Helius(無料10RPS) / Publicnode×2 の計3本にラウンドロビン。
-# 1本あたり実効1.7 RPS × 3本 = 5 RPS。Helius無料枠(10RPS)を余裕をもって下回る。
-# ※ Helius有料プランに切り替えた場合は 24〜48 に引き上げ可能。
-_SOLANA_RPS_LIMIT  = 5
+# 利用RPC: Publicnode×2 の計2本にラウンドロビン。
+# 1本あたり実効2 RPS × 2本 = 4 RPS。Publicnodeの無料枠を余裕をもって下回る。
+# ※ Helius有料プランに切り替えた場合は _SOLANA_RPC_LIST に追加して 24〜48 に引き上げ可能。
+_SOLANA_RPS_LIMIT  = 4
 _solana_rpc_times  = []            # 直近1秒間のRPC呼び出しタイムスタンプ
 _solana_rpc_lock   = threading.Lock()
 
@@ -3333,7 +3333,7 @@ def main():
     # ── 起動時スキャン（デプロイ直後に過去20分〜8時間のトークンを登録）──────
     send_telegram(
         "🔍 <b>起動スキャン中...</b>\n"
-        "過去20分〜8時間に作成されたトークンを遅延監視に登録しています\n"
+        "過去20分〜2時間に作成されたトークンを遅延監視に登録しています\n"
         "（EVM: 30〜60秒 / Solana: バックグラウンドで処理）"
     )
     _startup_scan()
@@ -3343,7 +3343,7 @@ def main():
         f"✅ <b>起動スキャン完了</b>\n\n"
         f"📋 EVM登録済み: {pending_count}件\n"
         f"🔄 Solana(Raydium): バックグラウンドで追加登録中\n\n"
-        f"⏰ 20分〜8時間前に作成されたトークンが取引開始したら即通知します"
+        f"⏰ 20分〜2時間前に作成されたトークンが取引開始したら即通知します"
     )
 
     # ── 起動通知スキャン（既に取引済みのトークンを即通知・アイコンフィルター確認）──
