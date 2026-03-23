@@ -2999,9 +2999,9 @@ def _startup_scan():
     """
     now     = time.time()
     MIN_AGE = 20 * 60   # 20分
-    MAX_AGE = 8 * 3600  # 8時間
+    MAX_AGE = 2 * 3600  # 2時間（8時間→2時間に短縮: getTransaction件数を約75%削減し429を抑制）
 
-    print(f"[起動スキャン] 開始: 過去20分〜8時間のトークンを遅延監視に登録中...")
+    print(f"[起動スキャン] 開始: 過去20分〜2時間のトークンを遅延監視に登録中...")
 
     # ── EVM: 全チェーンを並列スキャン ────────────────────────────────────────
     total  = [0]
@@ -3061,7 +3061,7 @@ def _startup_pumpfun_notify_scan():
     """
     now     = time.time()
     MIN_AGE = 20 * 60    # 20分
-    MAX_AGE = 8 * 3600   # 8時間
+    MAX_AGE = 2 * 3600   # 2時間（8時間→2時間に短縮: 起動スキャンと統一）
 
     _pf_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
