@@ -2064,6 +2064,27 @@ def _process_raydium_token(mint, liq_usd):
         print(f"[Raydium] スレッドエラー ({mint[:20]}): {e}")
 
 
+def _get_mint_creation_time(mint: str, pool_sig: str):
+    """
+    mintの実際の作成時刻をオンチェーンで取得。
+    プール作成TXより前のmint宛TXを最大50件取得し、最古のblockTimeを返す。
+    取得失敗・該当なし時はNoneを返す。
+    """
+    try:
+        sigs = solana_rpc("getSignaturesForAddress", [
+            mint,
+            {"limit": 50, "before": pool_sig, "commitment": "confirmed"}
+        ])
+        if sigs:
+            # リストは新→古の順 → 末尾が最古TX
+            oldest_bt = sigs[-1].get("blockTime")
+            if oldest_bt:
+                return float(oldest_bt)
+    except Exception as e:
+        print(f"[mint作成時刻取得] エラー: {e}")
+    return None
+
+
 def _handle_raydium_tx(sig):
     """Raydium シグネチャを処理するワーカー関数"""
     with _SOLANA_SEMAPHORE:
@@ -2095,6 +2116,22 @@ def _handle_raydium_tx(sig):
         if mint in known_token_mints:
             return
         known_token_mints.add(mint)
+
+    # mintの実際の作成時刻を取得して遅延ローンチ判定
+    # （botオフライン中に作成されたmintをプール検知時点で即判定）
+    mint_created = _get_mint_creation_time(mint, sig)
+    if mint_created is not None:
+        mint_age = now - mint_created
+        if mint_age >= 20 * 60:
+            # mintが20分以上前に作成 → 遅延ローンチ確定！即通知
+            print(f"[Raydium] 遅延ローンチ確定(mint作成{mint_age/60:.0f}分前) → 即通知: {mint[:20]}")
+            _notify_delayed_launch(mint, "sol", liq_usd, mint_age, "Raydium")
+            return
+        else:
+            print(f"[Raydium] mint作成{mint_age/60:.0f}分前 → 通常登録: {mint[:20]}")
+    else:
+        print(f"[Raydium] mint作成時刻取得失敗 → 通常登録: {mint[:20]}")
+
     _register_pending_token(mint, "sol", "Raydium")
     print(f"[Raydium] 新規mint → 遅延監視に登録: {mint[:20]} (${liq_usd:,.0f})")
 
@@ -2132,6 +2169,19 @@ def _handle_orca_meteora_tx(sig, label):
         if mint in known_token_mints:
             return
         known_token_mints.add(mint)
+
+    # mintの実際の作成時刻を取得して遅延ローンチ判定
+    mint_created = _get_mint_creation_time(mint, sig)
+    if mint_created is not None:
+        mint_age = now - mint_created
+        if mint_age >= 20 * 60:
+            print(f"[{label}] 遅延ローンチ確定(mint作成{mint_age/60:.0f}分前) → 即通知: {mint[:20]}")
+            _notify_delayed_launch(mint, "sol", liq_usd, mint_age, label)
+            return
+        else:
+            print(f"[{label}] mint作成{mint_age/60:.0f}分前 → 通常登録: {mint[:20]}")
+    else:
+        print(f"[{label}] mint作成時刻取得失敗 → 通常登録: {mint[:20]}")
 
     if liq_usd > 0:
         # 流動性OK → 即通知フロー（Raydiumと同じ _process_raydium_token を再利用）
@@ -2999,9 +3049,9 @@ def _startup_scan():
     """
     now     = time.time()
     MIN_AGE = 20 * 60   # 20分
-    MAX_AGE = 2 * 3600  # 2時間（8時間→2時間に短縮: getTransaction件数を約75%削減し429を抑制）
+    MAX_AGE = 4 * 3600  # 4時間（429解消後に2時間→4時間に拡大: DRONGO/CHIBSTEIN等の3〜4h前トークンをカバー）
 
-    print(f"[起動スキャン] 開始: 過去20分〜2時間のトークンを遅延監視に登録中...")
+    print(f"[起動スキャン] 開始: 過去20分〜4時間のトークンを遅延監視に登録中...")
 
     # ── EVM: 全チェーンを並列スキャン ────────────────────────────────────────
     total  = [0]
@@ -3061,7 +3111,7 @@ def _startup_pumpfun_notify_scan():
     """
     now     = time.time()
     MIN_AGE = 20 * 60    # 20分
-    MAX_AGE = 2 * 3600   # 2時間（8時間→2時間に短縮: 起動スキャンと統一）
+    MAX_AGE = 4 * 3600   # 4時間（起動スキャンと統一）
 
     _pf_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -3333,7 +3383,7 @@ def main():
     # ── 起動時スキャン（デプロイ直後に過去20分〜8時間のトークンを登録）──────
     send_telegram(
         "🔍 <b>起動スキャン中...</b>\n"
-        "過去20分〜2時間に作成されたトークンを遅延監視に登録しています\n"
+        "過去20分〜4時間に作成されたトークンを遅延監視に登録しています\n"
         "（EVM: 30〜60秒 / Solana: バックグラウンドで処理）"
     )
     _startup_scan()
@@ -3343,7 +3393,7 @@ def main():
         f"✅ <b>起動スキャン完了</b>\n\n"
         f"📋 EVM登録済み: {pending_count}件\n"
         f"🔄 Solana(Raydium): バックグラウンドで追加登録中\n\n"
-        f"⏰ 20分〜2時間前に作成されたトークンが取引開始したら即通知します"
+        f"⏰ 20分〜4時間前に作成されたトークンが取引開始したら即通知します"
     )
 
     # ── 起動通知スキャン（既に取引済みのトークンを即通知・アイコンフィルター確認）──
