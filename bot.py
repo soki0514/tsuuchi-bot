@@ -153,13 +153,13 @@ EVM_CHAINS = [
     },
     {
         "name": "Clanker/Base", "emoji": "🔵",
-        # mainnet.base.org → drpc → publicnode の順
+        # drpc → publicnode → mainnet.base.org の順（mainnet.base.orgは429多発のため最後尾）
         # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
-        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
+        # publicnode: eth_getLogs ブロック範囲 ~200制限
         "rpc_list": [
-            "https://mainnet.base.org",
             "https://base.drpc.org",
             "https://base-rpc.publicnode.com",
+            "https://mainnet.base.org",
         ],
         "contract": "0xe85a59c628f7d27878aceb4bf3b35733630083a9",
         "dex_url": "https://dexscreener.com/base/{}",
@@ -204,13 +204,13 @@ EVM_ALL_CHAINS = [
     {
         "name": "Base全般", "emoji": "🔵",
         # Uniswap V3 Factory監視（Clanker以外のBase全launchpad対応）
-        # mainnet.base.org → drpc → publicnode の順
+        # drpc → publicnode → mainnet.base.org の順（mainnet.base.orgは429多発のため最後尾）
         # llamarpc: 403 / 1rpc.io: SSL EOF → 除外
-        # publicnode: eth_getLogs ブロック範囲 ~200制限 → 最後尾
+        # publicnode: eth_getLogs ブロック範囲 ~200制限
         "rpc_list": [
-            "https://mainnet.base.org",
             "https://base.drpc.org",
             "https://base-rpc.publicnode.com",
+            "https://mainnet.base.org",
         ],
         "factory":      UNISWAP_V3_FACTORY_BASE,
         "topic":        POOL_CREATED_TOPIC,   # V3: PoolCreated
@@ -2414,7 +2414,9 @@ def _notify_delayed_launch(key: str, chain: str, liq_usd: float, age: float, sou
     # ── アイコンチェック ──────────────────────────────────────────────────────
     # アイコンなし → 削除せず pending_watch_loop ③ のアイコン出現チェックに委ねる
     # （削除すると後でアイコンが設定されても永遠に通知されなくなるため）
-    if not _has_token_icon(key, chain, dex):
+    # EVM（BSC/Base）はDexScreenerへの画像/socials登録が手動申請必須で
+    # 新規トークンは未登録のため、アイコンチェックをスキップして即通知する
+    if chain != "evm" and not _has_token_icon(key, chain, dex):
         # _pending_tokens に残したまま ③ でアイコン出現を待つ
         # ただし liq_found フラグを立てて「流動性確認済み」とマーク
         with _pending_lock:
@@ -2785,6 +2787,21 @@ def pending_watch_loop():
                         _pending_tokens[key]["icon_last_checked"] = now
 
                 chain = info.get("chain", "sol")
+
+                # EVM + liq_found=True → DexScreener登録待ちは不要、遅延ローンチ通知を即発火
+                if chain == "evm" and info.get("liq_found"):
+                    fresh_dex = None
+                    try:
+                        fresh_dex = analyze_dexscreener(key)
+                    except Exception:
+                        pass
+                    liq_saved  = info.get("liq_found_usd", 0)
+                    age_saved  = info.get("liq_found_age", now - info["created_at"])
+                    src_saved  = info.get("source", "EVM")
+                    _notify_delayed_launch(key, chain, liq_saved, age_saved, src_saved, fresh_dex)
+                    continue
+
+                # Solana等 → 通常のアイコンチェック
                 # 最新DexScreenerデータで再チェック
                 try:
                     fresh_dex = analyze_dexscreener(key)
