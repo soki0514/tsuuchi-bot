@@ -3,6 +3,7 @@ import time
 import os
 import re
 import threading
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -561,6 +562,35 @@ def _has_token_icon(key: str, chain: str, dex: dict = None) -> bool:
                     return True
     except Exception:
         pass
+
+    # ── Solana: on-chain Metaplexメタデータ URIをチェック ──────────────────────────
+    # pump.fun以外のlaunchpad（j7tracker.io / moonshot / rapidlaunch等）はpump.fun APIに
+    # 存在しないが、on-chainのMetaplexメタデータアカウントにURI（画像URL）を持つ。
+    # Metaplexメタデータ固定レイアウト:
+    #   key(1) + update_auth(32) + mint(32) + name(4+32) + symbol(4+10) = offset 115
+    #   uri_length(4) at offset 115 → uri content at offset 119 (padded to 200 bytes)
+    if chain == "sol":
+        try:
+            meta_accts = solana_rpc("getProgramAccounts", [
+                SPL_METADATA_PROGRAM,
+                {
+                    "encoding": "base64",
+                    "filters": [
+                        {"memcmp": {"offset": 33, "bytes": key}}  # offset 33 = mint pubkey field
+                    ]
+                }
+            ])
+            if meta_accts:
+                raw = base64.b64decode(meta_accts[0]["account"]["data"][0])
+                if len(raw) >= 123:
+                    uri_len = int.from_bytes(raw[115:119], 'little')
+                    if 0 < uri_len <= 200:
+                        uri = raw[119:119 + uri_len].decode('utf-8', errors='ignore').rstrip('\x00').strip()
+                        if uri.startswith('http'):
+                            print(f"[アイコン] Solana on-chain URI あり ({uri[:40]}): {key[:20]}")
+                            return True
+        except Exception as e:
+            print(f"[アイコン] on-chainメタデータ確認エラー: {e}")
 
     print(f"[アイコン] なし → スキップ: {key[:20]}")
     return False
