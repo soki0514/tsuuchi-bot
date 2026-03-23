@@ -2708,11 +2708,17 @@ def pending_watch_loop():
                         continue
 
                     # pairCreatedAt で20分以内取引開始を最終確認
+                    # launch_delay = pair_created - created_at で判定:
+                    #   > 0 かつ < WAIT_SEC → 正常新規ローンチ（遅延なし）→ 除外
+                    #   >= WAIT_SEC         → 遅延ローンチ → 通知
+                    #   <= 0               → pair_created <= created_at
+                    #                        （bot登録後にpairが作られた or EVM登録時刻ズレ）
+                    #                        → 除外しない（通知対象）
                     dex_data     = dex_map.get(key.lower(), {})
                     pair_created = dex_data.get("pair_created_at", 0)
                     if pair_created > 0:
                         launch_delay = pair_created - info["created_at"]
-                        if launch_delay < WAIT_SEC:
+                        if 0 < launch_delay < WAIT_SEC:
                             print(f"[遅延監視] 早期取引開始({launch_delay/60:.0f}分)→除外: {key[:20]}...")
                             with _pending_lock:
                                 _pending_tokens.pop(key, None)
@@ -3172,6 +3178,9 @@ def _startup_pumpfun_notify_scan():
                 continue
 
             market_cap = float(coin.get("usd_market_cap") or 0)
+            if market_cap < 10_000:
+                continue   # 時価総額$10k未満 → スキップ
+
             checked += 1
             age_m = int(age // 60)
             age_h = int(age // 3600)
