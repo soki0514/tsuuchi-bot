@@ -240,6 +240,9 @@ _pending_lock        = threading.Lock()
 _notified_tokens     = set()
 _notified_lock       = threading.Lock()
 
+# Solana起動スキャン完了フラグ（_startup_notify_scanとの同期用）
+_solana_startup_done = threading.Event()
+
 # EVM / Solana アドレス抽出用正規表現
 _EVM_ADDR_RE = re.compile(r'0x[a-fA-F0-9]{40}')
 # Solanaアドレスは誤検知しやすいため「CA:」等のキーワード必須
@@ -2981,6 +2984,10 @@ def _startup_scan_solana(now, min_age, max_age):
         if count > 0:
             print(f"[起動スキャン/{label}] {count}件を遅延監視に登録完了")
 
+    # 全プログラムのスキャン完了 → 通知スキャンに知らせる
+    _solana_startup_done.set()
+    print("[起動スキャン/Solana] 全プログラム完了 → 通知スキャンに通知")
+
 
 def _startup_scan():
     """
@@ -3176,8 +3183,12 @@ def _startup_notify_scan():
     BATCH_SIZE = 30
     WAIT_SEC   = 20 * 60  # 20分
 
-    # Solanaバックグラウンドスキャンの登録を少し待つ
-    time.sleep(10)
+    # Solana起動スキャンが完了するまで待機（最大10分）
+    # time.sleep(10) では間に合わないため、完了イベントで同期する
+    print("[起動通知スキャン] Solana起動スキャン完了待機中...")
+    _solana_startup_done.wait(timeout=600)
+    time.sleep(3)  # 登録の書き込みが落ち着くまで少し待つ
+    print("[起動通知スキャン] Solana起動スキャン完了確認 → 通知スキャン開始")
 
     with _pending_lock:
         targets = {
@@ -3254,17 +3265,19 @@ def _startup_notify_scan():
             if not info:
                 continue
 
-            # 取引開始が作成から20分以内なら除外（スパム判定）
+            # プール作成から20分未満ならスキップ（まだ新鮮すぎる）
+            # ※ 起動スキャンは「プール作成TX」を created_at に登録するため
+            #   launch_delay = pair_created_at - created_at ≈ 0 となり
+            #   旧ロジック（launch_delay < 20分）では全件除外されてしまう。
+            #   正しくは「今の時刻からプール作成まで20分以上経過しているか」で判定する。
             dex_data     = dex_map.get(key.lower(), {})
             pair_created = dex_data.get("pair_created_at", 0)
-            if pair_created > 0:
-                launch_delay = pair_created - info["created_at"]
-                if launch_delay < WAIT_SEC:
-                    skipped_age += 1
-                    with _pending_lock:
-                        _pending_tokens.pop(key, None)
-                    print(f"[起動通知スキャン] 早期取引({launch_delay/60:.0f}分) → 除外: {key[:20]}")
-                    continue
+            if pair_created > 0 and (now - pair_created) < WAIT_SEC:
+                skipped_age += 1
+                with _pending_lock:
+                    _pending_tokens.pop(key, None)
+                print(f"[起動通知スキャン] プール作成20分未満 → スキップ: {key[:20]}")
+                continue
 
             age = now - info["created_at"]
             # _notify_delayed_launch 内でアイコンフィルターが適用される
