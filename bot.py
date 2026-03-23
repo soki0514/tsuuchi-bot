@@ -2412,12 +2412,17 @@ def get_bitget_contract_addresses(coin):
 def _notify_delayed_launch(key: str, chain: str, liq_usd: float, age: float, source: str, dex: dict = None):
     """遅延ローンチ確定時の通知（重複防止付き）"""
     # ── アイコンチェック ──────────────────────────────────────────────────────
-    # 取引開始済み + アイコンなし → 削除（監視終了）
-    # ※ 未取引トークンのアイコン変化は pending_watch_loop ③ で別途検知
+    # アイコンなし → 削除せず pending_watch_loop ③ のアイコン出現チェックに委ねる
+    # （削除すると後でアイコンが設定されても永遠に通知されなくなるため）
     if not _has_token_icon(key, chain, dex):
+        # _pending_tokens に残したまま ③ でアイコン出現を待つ
+        # ただし liq_found フラグを立てて「流動性確認済み」とマーク
         with _pending_lock:
-            _pending_tokens.pop(key, None)
-        print(f"[遅延ローンチ] アイコンなし → 削除: {key[:20]}")
+            if key in _pending_tokens:
+                _pending_tokens[key]["liq_found"]    = True
+                _pending_tokens[key]["liq_found_usd"] = liq_usd
+                _pending_tokens[key]["liq_found_age"] = age
+        print(f"[遅延ローンチ] アイコンなし → ③アイコン待ちに移行: {key[:20]}")
         return
 
     with _notified_lock:
@@ -2719,6 +2724,10 @@ def pending_watch_loop():
                     liq  = liq_map.get(key.lower(), 0)
                     info = targets.get(key)
                     if not info:
+                        continue
+
+                    # liq_found=True → 流動性確認済みでアイコン待ち中 → ③に任せる
+                    if info.get("liq_found"):
                         continue
 
                     if not liq:
