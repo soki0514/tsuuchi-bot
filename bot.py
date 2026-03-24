@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import base64
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -487,6 +488,57 @@ def analyze_pumpfun_api(mint):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Metaplex PDA 計算（getProgramAccountsを使わず直接アドレスを計算）
+# ══════════════════════════════════════════════════════════════════════════════
+
+_B58_ALPHA = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+def _b58decode_32(s: str) -> bytes:
+    n = 0
+    for c in s.encode():
+        n = n * 58 + _B58_ALPHA.index(c)
+    return n.to_bytes(32, 'big')
+
+def _b58encode(b: bytes) -> str:
+    n = int.from_bytes(b, 'big')
+    result = ''
+    while n:
+        n, r = divmod(n, 58)
+        result = chr(_B58_ALPHA[r]) + result
+    for byte in b:
+        if byte == 0:
+            result = '1' + result
+        else:
+            break
+    return result
+
+def _ed25519_on_curve(b: bytes) -> bool:
+    """Ed25519曲線上にある点かどうか判定（PDAccheckに使用）"""
+    P = 2**255 - 19
+    D = (-121665 * pow(121666, P - 2, P)) % P
+    y = int.from_bytes(b, 'little') & ((1 << 255) - 1)
+    y2 = y * y % P
+    x2 = (y2 - 1) * pow(D * y2 + 1, P - 2, P) % P
+    return pow(x2, (P - 1) // 2, P) == 1
+
+def _compute_metaplex_pda(mint_b58: str) -> str | None:
+    """MetaplexメタデータアカウントのPDAアドレスをmintから計算"""
+    try:
+        META_PROG = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        prog_bytes = _b58decode_32(META_PROG)
+        mint_bytes = _b58decode_32(mint_b58)
+        seeds = [b"metadata", prog_bytes, mint_bytes]
+        for nonce in range(255, -1, -1):
+            seed_data = b"".join(seeds) + bytes([nonce]) + prog_bytes + b"ProgramDerivedAddress"
+            h = hashlib.sha256(seed_data).digest()
+            if not _ed25519_on_curve(h):
+                return _b58encode(h)
+        return None
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # アイコン（画像）チェック
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -564,31 +616,24 @@ def _has_token_icon(key: str, chain: str, dex: dict = None) -> bool:
         pass
 
     # ── Solana: on-chain Metaplexメタデータ URIをチェック ──────────────────────────
-    # pump.fun以外のlaunchpad（j7tracker.io / moonshot / rapidlaunch等）はpump.fun APIに
-    # 存在しないが、on-chainのMetaplexメタデータアカウントにURI（画像URL）を持つ。
-    # Metaplexメタデータ固定レイアウト:
-    #   key(1) + update_auth(32) + mint(32) + name(4+32) + symbol(4+10) = offset 115
-    #   uri_length(4) at offset 115 → uri content at offset 119 (padded to 200 bytes)
+    # PDAを直接計算してgetAccountInfoで取得（getProgramAccountsはタイムアウトするため使用禁止）
     if chain == "sol":
         try:
-            meta_accts = solana_rpc("getProgramAccounts", [
-                SPL_METADATA_PROGRAM,
-                {
-                    "encoding": "base64",
-                    "filters": [
-                        {"memcmp": {"offset": 33, "bytes": key}}  # offset 33 = mint pubkey field
-                    ]
-                }
-            ])
-            if meta_accts:
-                raw = base64.b64decode(meta_accts[0]["account"]["data"][0])
-                if len(raw) >= 123:
-                    uri_len = int.from_bytes(raw[115:119], 'little')
-                    if 0 < uri_len <= 200:
-                        uri = raw[119:119 + uri_len].decode('utf-8', errors='ignore').rstrip('\x00').strip()
-                        if uri.startswith('http'):
-                            print(f"[アイコン] Solana on-chain URI あり ({uri[:40]}): {key[:20]}")
-                            return True
+            meta_pda = _compute_metaplex_pda(key)
+            if meta_pda:
+                acct = solana_rpc("getAccountInfo", [
+                    meta_pda,
+                    {"encoding": "base64", "commitment": "confirmed"}
+                ])
+                if acct and acct.get("value"):
+                    raw = base64.b64decode(acct["value"]["data"][0])
+                    if len(raw) >= 123:
+                        uri_len = int.from_bytes(raw[115:119], 'little')
+                        if 0 < uri_len <= 200:
+                            uri = raw[119:119 + uri_len].decode('utf-8', errors='ignore').rstrip('\x00').strip()
+                            if uri.startswith('http'):
+                                print(f"[アイコン] Solana on-chain URI あり ({uri[:40]}): {key[:20]}")
+                                return True
         except Exception as e:
             print(f"[アイコン] on-chainメタデータ確認エラー: {e}")
 
@@ -890,6 +935,11 @@ def _wait_for_liquidity_mint(pair_addr, token_address, chain, from_block,
         holder_data = holder_result[0]
         dex         = dex_result[0]
 
+        # アイコンチェック: アイコンなし → スキップ（遅延ローンチ監視に委ねる）
+        if not _has_token_icon(token_address, "evm", dex):
+            print(f"[{chain['name']}] ❌ アイコンなし → スキップ: {token_address[:16]}")
+            return
+
         if holder_data is None:
             print(f"[{chain['name']}] 保有データ取得失敗 → 監視継続")
             continue
@@ -997,6 +1047,11 @@ def _process_evm_token(token_address, chain, from_block,
 
                 holder_data = holder_result[0]
                 dex         = dex_result[0]
+
+                # アイコンチェック: アイコンなし → スキップ（遅延ローンチ監視に委ねる）
+                if not _has_token_icon(token_address, "evm", dex):
+                    print(f"[{chain['name']}] ❌ アイコンなし → スキップ: {token_address[:16]}")
+                    return
 
                 if holder_data is None:
                     # 保有データ取得失敗でもスキップせず流動性のみで通知（見逃し防止）
@@ -1595,6 +1650,10 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
                     print(f"[{label}] pump.fun API 時価総額: ${liq:,.0f} ({mint[:16]})")
 
                     if liq > 0:
+                        # アイコンチェック: image_uri なし → グレープレースホルダー → スキップ
+                        if not pf.get("image_uri"):
+                            print(f"[{label}] ❌ アイコンなし(pump.fun) → スキップ: {mint[:20]}")
+                            return
                         holder_data = get_solana_holder_stats(mint)
                         if holder_data is None:
                             time.sleep(POLL_INTERVAL_SEC)
@@ -1648,6 +1707,10 @@ def _process_solana_token(mint, label="Pump.fun", pump_link=True):
             print(f"[{label}] DexScreener 流動性: ${liq:,.0f} ({mint[:16]})")
 
             if liq > 0:
+                # アイコンチェック: DexScreener/on-chain確認
+                if not _has_token_icon(mint, "sol", dex):
+                    print(f"[{label}] ❌ アイコンなし(DexScreener) → スキップ: {mint[:20]}")
+                    return
                 holder_data = get_solana_holder_stats(mint)
                 if holder_data is None:
                     time.sleep(POLL_INTERVAL_SEC)
@@ -2414,9 +2477,7 @@ def _notify_delayed_launch(key: str, chain: str, liq_usd: float, age: float, sou
     # ── アイコンチェック ──────────────────────────────────────────────────────
     # アイコンなし → 削除せず pending_watch_loop ③ のアイコン出現チェックに委ねる
     # （削除すると後でアイコンが設定されても永遠に通知されなくなるため）
-    # EVM（BSC/Base）はDexScreenerへの画像/socials登録が手動申請必須で
-    # 新規トークンは未登録のため、アイコンチェックをスキップして即通知する
-    if chain != "evm" and not _has_token_icon(key, chain, dex):
+    if not _has_token_icon(key, chain, dex):
         # _pending_tokens に残したまま ③ でアイコン出現を待つ
         # ただし liq_found フラグを立てて「流動性確認済み」とマーク
         with _pending_lock:
@@ -2788,21 +2849,8 @@ def pending_watch_loop():
 
                 chain = info.get("chain", "sol")
 
-                # EVM + liq_found=True → DexScreener登録待ちは不要、遅延ローンチ通知を即発火
-                if chain == "evm" and info.get("liq_found"):
-                    fresh_dex = None
-                    try:
-                        fresh_dex = analyze_dexscreener(key)
-                    except Exception:
-                        pass
-                    liq_saved  = info.get("liq_found_usd", 0)
-                    age_saved  = info.get("liq_found_age", now - info["created_at"])
-                    src_saved  = info.get("source", "EVM")
-                    _notify_delayed_launch(key, chain, liq_saved, age_saved, src_saved, fresh_dex)
-                    continue
-
-                # Solana等 → 通常のアイコンチェック
                 # 最新DexScreenerデータで再チェック
+                chain = info.get("chain", "sol")
                 try:
                     fresh_dex = analyze_dexscreener(key)
                 except Exception:
