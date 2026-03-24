@@ -2482,9 +2482,13 @@ def _notify_delayed_launch(key: str, chain: str, liq_usd: float, age: float, sou
         # ただし liq_found フラグを立てて「流動性確認済み」とマーク
         with _pending_lock:
             if key in _pending_tokens:
-                _pending_tokens[key]["liq_found"]    = True
-                _pending_tokens[key]["liq_found_usd"] = liq_usd
-                _pending_tokens[key]["liq_found_age"] = age
+                _pending_tokens[key]["liq_found"]      = True
+                _pending_tokens[key]["liq_found_usd"]  = liq_usd
+                _pending_tokens[key]["liq_found_age"]  = age
+                # ここで1回アイコンチェック済みなので失敗カウントを1から開始
+                _pending_tokens[key]["icon_fail_count"] = (
+                    _pending_tokens[key].get("icon_fail_count", 0) + 1
+                )
         print(f"[遅延ローンチ] アイコンなし → ③アイコン待ちに移行: {key[:20]}")
         return
 
@@ -2835,28 +2839,45 @@ def pending_watch_loop():
             # ── ③ アイコン出現チェック（20分以上経過した全トークン）──────────────
             # 流動性あり・なし問わず、アイコンが設定された瞬間に即通知する。
             # 取引開始前でもアイコン変更を検知して通知（5分おき）。
-            ICON_CHECK_INTV = 5 * 60  # 5分おき
+            ICON_CHECK_INTV = 2 * 60  # 2分おき
             icon_waiting = {
                 k: v for k, v in all_tokens.items()
                 if now - v["created_at"] >= WAIT_SEC               # 20分以上経過した全件
                 and now - v.get("icon_last_checked", 0) >= ICON_CHECK_INTV
             }
             for key, info in icon_waiting.items():
-                # チェック時刻を更新（次の5分まで再チェックしない）
+                chain = info.get("chain", "sol")
+
+                # ── EVM: アイコン失敗回数チェック ──────────────────────────────
+                # EVMはDexScreener手動登録が必要で新規トークンは永久に失敗する。
+                # 6回失敗（約30分）したら削除してループ負荷を防ぐ。
+                if chain == "evm":
+                    fails = info.get("icon_fail_count", 0)
+                    if fails >= 6:
+                        with _pending_lock:
+                            _pending_tokens.pop(key, None)
+                        print(f"[アイコン待ち] EVM 30分失敗 → 削除: {key[:20]}")
+                        continue
+
+                # チェック時刻・失敗カウントを更新
                 with _pending_lock:
                     if key in _pending_tokens:
                         _pending_tokens[key]["icon_last_checked"] = now
 
-                chain = info.get("chain", "sol")
-
-                # 最新DexScreenerデータで再チェック
-                chain = info.get("chain", "sol")
-                try:
-                    fresh_dex = analyze_dexscreener(key)
-                except Exception:
-                    fresh_dex = None
+                # liq_found=True のトークンは保存済みデータを使う（再HTTP不要）
+                if info.get("liq_found"):
+                    fresh_dex = None   # _has_token_iconのDexScreenerブランチはスキップ
+                else:
+                    try:
+                        fresh_dex = analyze_dexscreener(key)
+                    except Exception:
+                        fresh_dex = None
 
                 if not _has_token_icon(key, chain, fresh_dex):
+                    # 失敗カウントをインクリメント
+                    with _pending_lock:
+                        if key in _pending_tokens:
+                            _pending_tokens[key]["icon_fail_count"] = info.get("icon_fail_count", 0) + 1
                     continue  # まだアイコンなし → 次の5分後に再チェック
 
                 # ── アイコン出現！通知 ─────────────────────────────────────
