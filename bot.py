@@ -1,4 +1,4 @@
-import requests
+あimport requests
 import time
 import os
 import re
